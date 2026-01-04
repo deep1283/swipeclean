@@ -56,7 +56,7 @@ export default function App() {
   };
 
   const restoreFromTrash = (itemId) => {
-    setTrashedItems(trashedItems.filter(item => item.id !== itemId));
+    setTrashedItems(prev => prev.filter(item => item.id !== itemId));
   };
 
   const deleteFromTrash = async (itemId) => {
@@ -66,7 +66,7 @@ export default function App() {
         if (!isWeb) {
           await MediaLibrary.deleteAssetsAsync([item.id]);
         }
-        setTrashedItems(trashedItems.filter(i => i.id !== itemId));
+        setTrashedItems(prev => prev.filter(i => i.id !== itemId));
       } catch (error) {
         Alert.alert('Error', 'Could not delete the file');
       }
