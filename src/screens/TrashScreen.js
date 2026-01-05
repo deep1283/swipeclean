@@ -10,7 +10,8 @@ import {
     Dimensions,
     SafeAreaView,
     StatusBar,
-    Platform
+    Platform,
+    BackHandler
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -22,6 +23,21 @@ const ITEM_SIZE = (SCREEN_WIDTH - (SPACING * (NUM_COLUMNS - 1))) / NUM_COLUMNS;
 export default function TrashScreen({ onBack, items, onRestore, onDelete, onEmptyTrash }) {
     const [selectedIds, setSelectedIds] = useState([]);
     const [isSelectionMode, setIsSelectionMode] = useState(false);
+
+    // Handle Android Back Button
+    useEffect(() => {
+        const onBackPress = () => {
+            onBack();
+            return true; // Prevent default behavior (exit app)
+        };
+
+        const subscription = BackHandler.addEventListener(
+            'hardwareBackPress',
+            onBackPress
+        );
+
+        return () => subscription.remove();
+    }, [onBack]);
 
     // --- Helpers ---
     const getTimeRemaining = (expiresAt) => {

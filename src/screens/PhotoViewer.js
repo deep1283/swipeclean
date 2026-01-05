@@ -8,7 +8,8 @@ import {
     Dimensions,
     StatusBar,
     SafeAreaView,
-    Platform
+    Platform,
+    BackHandler
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import Animated, {
@@ -263,6 +264,21 @@ export default function PhotoViewer({ assets, initialIndex, onClose, onTrash }) 
     const nextAsset = currentIndex < localAssets.length - 1 ? localAssets[currentIndex + 1] : null;
     const prevAsset = currentIndex > 0 ? localAssets[currentIndex - 1] : null;
     if (!currentAsset) return null;
+
+    // Handle Android Back Button
+    useEffect(() => {
+        const onBackPress = () => {
+            onClose();
+            return true; // Prevent default behavior (exit app)
+        };
+
+        const subscription = BackHandler.addEventListener(
+            'hardwareBackPress',
+            onBackPress
+        );
+
+        return () => subscription.remove();
+    }, [onClose]);
 
     // Prefetching
     useEffect(() => {

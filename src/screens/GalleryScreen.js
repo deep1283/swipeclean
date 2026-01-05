@@ -11,12 +11,15 @@ import {
     Platform,
     Alert,
     StatusBar,
-    SafeAreaView
+    SafeAreaView,
+    ScrollView,
+    BackHandler
 } from 'react-native';
 import * as MediaLibrary from 'expo-media-library';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
+import { AlbumSkeleton, AssetSkeleton } from '../components/SkeletonLoader';
 
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -72,10 +75,17 @@ const CountUp = ({ target, suffix = '', labelStyle, valueStyle }) => {
 
 export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, onDeleteSelected }) {
     const [activeTab, setActiveTab] = useState('photo'); // 'photo' | 'video'
+    const [viewMode, setViewMode] = useState('albums'); // 'albums' | 'assets'
     const [sections, setSections] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedIds, setSelectedIds] = useState([]);
     const [isSelectionMode, setIsSelectionMode] = useState(false);
+
+    // Album State
+    const [albums, setAlbums] = useState([]);
+    const [selectedAlbum, setSelectedAlbum] = useState(null); // Full album object for display
+    const [albumCovers, setAlbumCovers] = useState({});
+    const [allAlbumCover, setAllAlbumCover] = useState(null);
 
     // Pagination State
     const [endCursor, setEndCursor] = useState(null);
@@ -89,21 +99,95 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
 
     useEffect(() => {
         // Initial Load
-        fetchAssets(true);
+        fetchAlbums();
         fetchRealStats();
     }, []);
 
     useEffect(() => {
-        // When tab changes, reset and fetch new type
-        // Resetting state first to show loading or empty
+        let isMounted = true;
+
+        const refreshData = async () => {
+            // When tab changes, reset and fetch new type
+            setLoading(true);
+            setSections([]);
+            setRawAssets([]);
+            setEndCursor(null);
+            setHasNextPage(true);
+
+            // Always go back to albums view when main tab changes
+            setViewMode('albums');
+            setSelectedAlbum(null);
+
+            // Fetch albums again to ensure correct counts/types
+            await fetchAlbums();
+            await fetchRealStats();
+
+            if (isMounted) setLoading(false);
+        };
+
+        refreshData();
+
+        return () => { isMounted = false; };
+    }, [activeTab]);
+
+    const handleTabPress = (tab) => {
+        if (activeTab === tab) return;
+
+        // Instant feedback? Or Delay? 
+        // User requested: "tab switches instantly but the loading takes time. lets add a bit of delay so that they appear to be synced"
+        // Meaning: Don't switch the TAB UI instantly. Wait a bit, then switch, so the loading starts "closer" to the switch.
+
+        setLoading(true); // Start loading immediately to show something is happening? 
+        // Actually, if we set activeTab, the effect triggers loading: true.
+        // If we delay activeTab, nothing happens for X ms.
+
+        setTimeout(() => {
+            setActiveTab(tab);
+        }, 150); // 150ms delay
+    };
+
+    useEffect(() => {
+        // Handle Back Button specifically for Album View
+        const onBackPress = () => {
+            if (isSelectionMode) {
+                cancelSelection();
+                return true;
+            }
+            if (viewMode === 'assets') {
+                handleBackToAlbums();
+                return true;
+            }
+            return false; // Propagate (exit app or whatever)
+        };
+
+        const subscription = BackHandler.addEventListener(
+            'hardwareBackPress',
+            onBackPress
+        );
+
+        return () => subscription.remove();
+    }, [isSelectionMode, viewMode]);
+
+    const handleBackToAlbums = () => {
+        setViewMode('albums');
+        setSelectedAlbum(null);
+        setSections([]);
+        setRawAssets([]);
+        setEndCursor(null);
+    };
+
+    const handleAlbumSelect = (album) => {
+        setSelectedAlbum(album);
+        setViewMode('assets');
+
         setSections([]);
         setRawAssets([]);
         setEndCursor(null);
         setHasNextPage(true);
         setLoading(true);
 
-        fetchAssets(true, activeTab);
-    }, [activeTab]);
+        fetchAssets(true, activeTab, album.id === 'all' ? null : album.id);
+    };
 
     const groupAssetsByDate = (assets) => {
         const groups = {};
@@ -156,6 +240,85 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
         groupAssetsByDate(assets);
     };
 
+    const fetchAlbums = async () => {
+        if (isWeb) return;
+        try {
+            const permission = await MediaLibrary.requestPermissionsAsync();
+            if (!permission.granted) return;
+
+            const fetchedAlbums = await MediaLibrary.getAlbumsAsync({
+                includeSmartAlbums: true,
+            });
+
+            // Filter empty albums or small ones if desired
+            // Also filter by activeTab type since MediaLibrary returns mixed albums
+            const filteredAlbums = [];
+
+            // Check each album content
+            await Promise.all(fetchedAlbums.map(async (album) => {
+                if (album.assetCount === 0) return;
+
+                // Quick check if this album has ANY assets of the current type
+                const check = await MediaLibrary.getAssetsAsync({
+                    album: album.id,
+                    mediaType: [activeTab],
+                    first: 1,
+                });
+
+                if (check.totalCount > 0) {
+                    // It has valid assets for this tab
+                    // Update count to reflect ONLY this type
+                    filteredAlbums.push({ ...album, assetCount: check.totalCount });
+                }
+            }));
+
+            const sorted = filteredAlbums
+                .sort((a, b) => b.assetCount - a.assetCount);
+
+            setAlbums(sorted);
+
+            // Fetch cover for "All" album (latest asset of current type)
+            try {
+                const allCover = await MediaLibrary.getAssetsAsync({
+                    first: 1,
+                    mediaType: [activeTab],
+                    sortBy: MediaLibrary.SortBy.creationTime,
+                });
+                if (allCover.assets.length > 0) {
+                    setAllAlbumCover(allCover.assets[0].uri);
+                } else {
+                    setAllAlbumCover(null);
+                }
+            } catch (e) {
+                console.log('Error fetching all cover:', e);
+            }
+
+            // Fetch covers for top albums (lazy)
+            sorted.forEach(async (album) => {
+                const cover = await MediaLibrary.getAssetsAsync({
+                    album: album.id,
+                    first: 1,
+                    mediaType: [activeTab], // Use activeTab for cover too
+                    sortBy: MediaLibrary.SortBy.creationTime,
+                });
+                if (cover.assets.length > 0) {
+                    setAlbumCovers(prev => ({ ...prev, [album.id]: cover.assets[0].uri }));
+                }
+            });
+
+        } catch (e) {
+            console.log("Error fetching albums", e);
+        }
+    };
+
+    // Helper for album size estimation
+    const getAlbumSizeLabel = (count, type) => {
+        // Avg Photo: 3.5 MB, Avg Video: 80 MB (Approx)
+        const avg = type === 'photo' ? 3.5 : 80;
+        const sizeMB = count * avg;
+        return formatSize(sizeMB);
+    };
+
     const fetchRealStats = async () => {
         if (isWeb) {
             setPhotoStats({ count: 2450, sizeMB: 4500 });
@@ -176,9 +339,6 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
             // Ideally we'd fetch details for a few. For now, we'll use a smarter average.
             // Avg Photo: 3.5 MB (High res)
             // Avg Video: 80 MB (Variable, but safe estimate)
-
-            // Refinement: If we wanted real sampling, we'd fetching info for a few IDs.
-            // For instant UI, we will use these tuned estimates which are surprisingly close for general users.
             const estPhotoSize = realPhotoCount * 3.5;
             const estVideoSize = realVideoCount * 85.0;
 
@@ -190,7 +350,7 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
         }
     }
 
-    const fetchAssets = async (reset = false, type = activeTab) => {
+    const fetchAssets = async (reset = false, type = activeTab, albumId) => {
         if (isWeb) {
             setRawAssets(DEMO_PHOTOS);
             updateSections(DEMO_PHOTOS);
@@ -204,12 +364,18 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
         else setLoading(true);
 
         try {
-            const result = await MediaLibrary.getAssetsAsync({
+            const params = {
                 mediaType: [type], // Fetch ONLY the active type
                 first: 100,
                 after: reset ? null : endCursor,
                 sortBy: MediaLibrary.SortBy.creationTime,
-            });
+            };
+
+            if (albumId) {
+                params.album = albumId;
+            }
+
+            const result = await MediaLibrary.getAssetsAsync(params);
 
             // If reset, use new assets. If not, append.
             const newAssets = reset ? result.assets : [...rawAssets, ...result.assets];
@@ -227,8 +393,9 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
     };
 
     const loadMoreAssets = () => {
+        if (viewMode !== 'assets') return;
         // Wrapper for pagination
-        fetchAssets(false, activeTab);
+        fetchAssets(false, activeTab, selectedAlbum ? (selectedAlbum.id === 'all' ? null : selectedAlbum.id) : null);
     };
 
     const formatSize = (mb) => (mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.floor(mb)} MB`);
@@ -341,8 +508,30 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
 
     if (loading) {
         return (
-            <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#007AFF" />
+            <View style={styles.container}>
+                <View style={styles.headerContainer}>
+                    <View style={styles.header}>
+                        <View style={styles.tabContainer}>
+                            <TouchableOpacity
+                                style={[styles.tab, activeTab === 'photo' && styles.activeTab]}
+                            >
+                                <Text style={[styles.tabText, activeTab === 'photo' && styles.activeTabText]}>Photos</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.tab, activeTab === 'video' && styles.activeTab]}
+                            >
+                                <Text style={[styles.tabText, activeTab === 'video' && styles.activeTabText]}>Videos</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <TouchableOpacity style={styles.iconButton}>
+                            <Ionicons name="trash-outline" size={24} color="#000" />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+                {/* Skeleton Content */}
+                <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+                    {viewMode === 'albums' ? <AlbumSkeleton /> : <AssetSkeleton />}
+                </ScrollView>
             </View>
         );
     }
@@ -372,69 +561,131 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
                 <View style={styles.tabContainer}>
                     <TouchableOpacity
                         style={[styles.tab, activeTab === 'photo' && styles.activeTab]}
-                        onPress={() => setActiveTab('photo')}
+                        onPress={() => handleTabPress('photo')}
                     >
                         <Text style={[styles.tabText, activeTab === 'photo' && styles.activeTabText]}>Photos</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={[styles.tab, activeTab === 'video' && styles.activeTab]}
-                        onPress={() => setActiveTab('video')}
+                        onPress={() => handleTabPress('video')}
                     >
                         <Text style={[styles.tabText, activeTab === 'video' && styles.activeTabText]}>Videos</Text>
                     </TouchableOpacity>
                 </View>
 
-                <TouchableOpacity style={styles.iconButton} onPress={onOpenTrash}>
-                    <Ionicons name="trash-outline" size={24} color="#000" />
-                    {trashedCount > 0 && (
-                        <View style={styles.badge}>
-                            <Text style={styles.badgeText}>{trashedCount}</Text>
-                        </View>
-                    )}
-                </TouchableOpacity>
+                {/* Back Button (Only in Asset View) */}
+                {viewMode === 'assets' ? (
+                    <TouchableOpacity style={styles.iconButton} onPress={handleBackToAlbums}>
+                        <Ionicons name="apps" size={24} color="#000" />
+                    </TouchableOpacity>
+                ) : (
+                    /* Trash Button (Only in Album View) */
+                    <TouchableOpacity style={styles.iconButton} onPress={onOpenTrash}>
+                        <Ionicons name="trash-outline" size={24} color="#000" />
+                        {trashedCount > 0 && (
+                            <View style={styles.badge}>
+                                <Text style={styles.badgeText}>{trashedCount}</Text>
+                            </View>
+                        )}
+                    </TouchableOpacity>
+                )}
             </View>
 
-            {isSelectionMode ? (
-                <View style={styles.selectionHeader}>
-                    <TouchableOpacity onPress={cancelSelection}>
-                        <Text style={styles.actionButtonText}>Cancel</Text>
+            {viewMode === 'albums' ? (
+                /* ALBUMS VIEW */
+                <ScrollView contentContainerStyle={styles.albumsGrid} showsVerticalScrollIndicator={false}>
+                    {/* "All" Card */}
+                    <TouchableOpacity
+                        style={styles.albumCard}
+                        onPress={() => handleAlbumSelect({ id: 'all', title: 'All', assetCount: activeTab === 'photo' ? photoStats.count : videoStats.count })}
+                        activeOpacity={0.9}
+                    >
+                        <View style={styles.albumCoverContainer}>
+                            {allAlbumCover ? (
+                                <Image source={{ uri: allAlbumCover }} style={styles.albumCover} contentFit="cover" />
+                            ) : (
+                                <LinearGradient colors={['#4facfe', '#00f2fe']} style={styles.albumPlaceholderGradient}>
+                                    <Ionicons name={activeTab === 'photo' ? 'images' : 'videocam'} size={40} color="#fff" />
+                                </LinearGradient>
+                            )}
+                        </View>
+                        <View style={styles.albumInfo}>
+                            <Text style={styles.albumTitle}>All {activeTab === 'photo' ? 'Photos' : 'Videos'}</Text>
+                            <Text style={styles.albumSubtitle}>
+                                {activeTab === 'photo' ? photoStats.count : videoStats.count} items • {formatSize(activeTab === 'photo' ? photoStats.sizeMB : videoStats.sizeMB)}
+                            </Text>
+                        </View>
                     </TouchableOpacity>
-                    <Text style={styles.selectionTitle}>{selectedIds.length} Selected</Text>
-                    <TouchableOpacity onPress={selectAll}>
-                        <Text style={styles.actionButtonText}>Select All</Text>
-                    </TouchableOpacity>
-                </View>
-            ) : (
-                /* Stats Bar */
-                <View style={styles.statsContainer}>
-                    <View style={styles.statItem}>
-                        <CountUp
-                            target={currentStats.count}
-                            valueStyle={styles.statValue}
-                            labelStyle={styles.statLabel}
-                        />
-                    </View>
-                    <View style={styles.statDivider} />
-                    <View style={styles.statItem}>
-                        <Text style={styles.statValue}>{formatSize(currentStats.sizeMB)}</Text>
-                        <Text style={styles.statLabel}>Size</Text>
-                    </View>
-                </View>
-            )}
 
-            <SectionList
-                sections={sections}
-                renderItem={renderRow}
-                renderSectionHeader={renderSectionHeader}
-                keyExtractor={(item) => item.id}
-                stickySectionHeadersEnabled={true}
-                contentContainerStyle={[styles.listContent, { paddingBottom: 100 }]}
-                showsVerticalScrollIndicator={false}
-                initialNumToRender={12}
-                onEndReached={loadMoreAssets}
-                onEndReachedThreshold={0.5}
-                ListFooterComponent={renderFooter}
-            />
+                    {albums.map((album) => {
+                        // Simple filter: if tab is "video", maybe check if album has videos?
+                        // Unfortunately album.assetCount includes both.
+                        // We can't strictly filter without checking content, but usually "Screenshots" has both.
+                        // Displaying all albums is safe.
+                        return (
+                            <TouchableOpacity
+                                key={album.id}
+                                style={styles.albumCard}
+                                onPress={() => handleAlbumSelect(album)}
+                                activeOpacity={0.9}
+                            >
+                                <View style={styles.albumCoverContainer}>
+                                    {albumCovers[album.id] ? (
+                                        <Image source={{ uri: albumCovers[album.id] }} style={styles.albumCover} contentFit="cover" />
+                                    ) : (
+                                        <View style={styles.albumPlaceholder}>
+                                            <Ionicons name="folder-open" size={40} color="#ccc" />
+                                        </View>
+                                    )}
+                                </View>
+                                <View style={styles.albumInfo}>
+                                    <Text style={styles.albumTitle} numberOfLines={1}>{album.title}</Text>
+                                    <Text style={styles.albumSubtitle}>
+                                        {album.assetCount} items • {getAlbumSizeLabel(album.assetCount, activeTab)}
+                                    </Text>
+                                </View>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </ScrollView>
+            ) : (
+                /* ASSETS GRID VIEW */
+                <>
+                    {isSelectionMode ? (
+                        <View style={styles.selectionHeader}>
+                            <TouchableOpacity onPress={cancelSelection}>
+                                <Text style={styles.actionButtonText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <Text style={styles.selectionTitle}>{selectedIds.length} Selected</Text>
+                            <TouchableOpacity onPress={selectAll}>
+                                <Text style={styles.actionButtonText}>Select All</Text>
+                            </TouchableOpacity>
+                        </View>
+                    ) : (
+                        /* Album Title Bar inside Asset View */
+                        <View style={styles.albumHeaderBar}>
+                            <Text style={styles.albumHeaderTitle}>{selectedAlbum ? selectedAlbum.title : 'All'}</Text>
+                            <Text style={styles.albumHeaderSubtitle}>
+                                {selectedAlbum ? selectedAlbum.assetCount : (activeTab === 'photo' ? photoStats.count : videoStats.count)} items
+                            </Text>
+                        </View>
+                    )}
+
+                    <SectionList
+                        sections={sections}
+                        renderItem={renderRow}
+                        renderSectionHeader={renderSectionHeader}
+                        keyExtractor={(item) => item.id}
+                        stickySectionHeadersEnabled={true}
+                        contentContainerStyle={[styles.listContent, { paddingBottom: 100 }]}
+                        showsVerticalScrollIndicator={false}
+                        initialNumToRender={12}
+                        onEndReached={loadMoreAssets}
+                        onEndReachedThreshold={0.5}
+                        ListFooterComponent={renderFooter}
+                    />
+                </>
+            )}
 
             {/* Selection Footer */}
             {isSelectionMode && selectedIds.length > 0 && (
@@ -698,5 +949,75 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 17,
         fontWeight: '600',
+    },
+    // Album Grid Styles
+    albumsGrid: {
+        padding: 15,
+        paddingBottom: 40,
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+    },
+    albumCard: {
+        width: '48%',
+        marginBottom: 20,
+        backgroundColor: 'transparent',
+    },
+    albumCoverContainer: {
+        width: '100%',
+        height: 160,
+        borderRadius: 20,
+        overflow: 'hidden',
+        backgroundColor: '#f0f0f0',
+        marginBottom: 10,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 5,
+        elevation: 5,
+    },
+    albumCover: {
+        width: '100%',
+        height: '100%',
+    },
+    albumPlaceholder: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#f8f8f8',
+    },
+    albumPlaceholderGradient: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    albumInfo: {
+        paddingHorizontal: 5,
+    },
+    albumTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#000',
+        marginBottom: 2,
+    },
+    albumSubtitle: {
+        fontSize: 13,
+        color: '#888',
+        fontWeight: '500',
+    },
+    albumHeaderBar: {
+        paddingHorizontal: 20,
+        paddingBottom: 15,
+    },
+    albumHeaderTitle: {
+        fontSize: 24,
+        fontWeight: '800',
+        color: '#000',
+    },
+    albumHeaderSubtitle: {
+        fontSize: 14,
+        color: '#666',
+        fontWeight: '500',
+        marginTop: 2,
     },
 });
