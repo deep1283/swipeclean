@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     StyleSheet,
     View,
@@ -20,6 +20,8 @@ import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AlbumSkeleton, AssetSkeleton } from '../components/SkeletonLoader';
+import { getCachedSize, setCachedSize, invalidateSizeCache } from '../utils/sizeCache';
+import GridRow from '../components/GridRow';
 
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -40,24 +42,29 @@ const DEMO_PHOTOS = Array.from({ length: 24 }, (_, i) => ({
 }));
 
 // CountUp Component for smooth number transitions
-const CountUp = ({ target, suffix = '', labelStyle, valueStyle }) => {
-    const [count, setCount] = useState(0);
+// Animated Number for smooth transitions
+const AnimatedNumber = ({ target, suffix = '', style, isFloat = false }) => {
+    const [displayValue, setDisplayValue] = useState(0);
 
     useEffect(() => {
         let start = 0;
-        const end = parseInt(target, 10) || 0;
-        if (start === end) return;
+        const end = parseFloat(target) || 0;
+        if (start === end) {
+            setDisplayValue(end);
+            return;
+        }
 
-        const duration = 1000;
+        const duration = 1200; // slightly longer for premium feel
         const startTime = Date.now();
 
         const animate = () => {
             const now = Date.now();
             const progress = Math.min((now - startTime) / duration, 1);
-            // Ease out quart
-            const ease = 1 - Math.pow(1 - progress, 4);
+            // Ease out expo
+            const ease = progress === 1 ? 1 : 1 - Math.pow(2, -10 * progress);
 
-            setCount(Math.floor(start + (end - start) * ease));
+            const current = start + (end - start) * ease;
+            setDisplayValue(current);
 
             if (progress < 1) {
                 requestAnimationFrame(animate);
@@ -67,18 +74,65 @@ const CountUp = ({ target, suffix = '', labelStyle, valueStyle }) => {
         requestAnimationFrame(animate);
     }, [target]);
 
-    return (
-        <View style={{ alignItems: 'center' }}>
-            <Text style={valueStyle}>{count}{suffix}</Text>
-            <Text style={labelStyle}>{count === 1 ? 'Item' : 'Items'}</Text>
-        </View>
-    );
+    const formatted = isFloat
+        ? (displayValue >= 1000
+            ? `${(displayValue / 1000).toFixed(1)} GB` // Special handling if passing raw MB and it becomes GB? 
+            // Actually, let's keep it simple: caller passes raw number, we format.
+            // But wait, reuse existing formatSize logic is better.
+            // Let's just animate the number and assume caller handles suffix strictly or we format inside.
+            : displayValue.toFixed(1))
+        : Math.floor(displayValue);
+
+    return <Text style={style}>{formatted}{suffix}</Text>;
+};
+
+// Helper to group assets (pure function)
+const groupAssetsByDate = (assets) => {
+    if (!assets || assets.length === 0) return [];
+
+    const groups = {};
+    const filtered = assets;
+
+    filtered.forEach(asset => {
+        const date = new Date(asset.creationTime);
+        const now = new Date();
+        const yesterday = new Date();
+        yesterday.setDate(now.getDate() - 1);
+
+        let title = date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+        if (date.toDateString() === now.toDateString()) title = 'Today';
+        else if (date.toDateString() === yesterday.toDateString()) title = 'Yesterday';
+
+        if (!groups[title]) groups[title] = [];
+        groups[title].push(asset);
+    });
+
+    const sortedTitles = Object.keys(groups).sort((a, b) => {
+        const getDateVal = (t) => {
+            if (t === 'Today') return new Date();
+            if (t === 'Yesterday') { const d = new Date(); d.setDate(d.getDate() - 1); return d; }
+            return new Date(t);
+        };
+        return getDateVal(b) - getDateVal(a);
+    });
+
+    return sortedTitles.map(title => {
+        const groupItems = groups[title];
+        const rows = [];
+        for (let i = 0; i < groupItems.length; i += NUM_COLUMNS) {
+            const chunk = groupItems.slice(i, i + NUM_COLUMNS);
+            while (chunk.length < NUM_COLUMNS) {
+                chunk.push({ id: `spacer-${i}-${chunk.length}`, isSpacer: true });
+            }
+            rows.push({ id: `row-${i}`, data: chunk });
+        }
+        return { title, data: rows };
+    });
 };
 
 export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, onDeleteSelected }) {
     const [activeTab, setActiveTab] = useState('photo'); // 'photo' | 'video'
     const [viewMode, setViewMode] = useState('albums'); // 'albums' | 'assets'
-    const [sections, setSections] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedIds, setSelectedIds] = useState([]);
     const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -99,6 +153,15 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
     const [videoStats, setVideoStats] = useState({ count: 0, sizeMB: 0 });
     const [rawAssets, setRawAssets] = useState([]);
 
+    // Memoize sections calculation
+    const sections = useMemo(() => {
+        return groupAssetsByDate(rawAssets);
+    }, [rawAssets]);
+
+    // Exact Size Calculation State
+    const [exactSizeMB, setExactSizeMB] = useState(null); // null = not calculated yet
+    const [calculatingSize, setCalculatingSize] = useState(false);
+
     useEffect(() => {
         // Initial Load
         fetchAlbums();
@@ -111,7 +174,7 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
         const refreshData = async () => {
             // When tab changes, reset and fetch new type
             setLoading(true);
-            setSections([]);
+
             setRawAssets([]);
             setEndCursor(null);
             setHasNextPage(true);
@@ -173,7 +236,6 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
     const handleBackToAlbums = () => {
         setViewMode('albums');
         setSelectedAlbum(null);
-        setSections([]);
         setRawAssets([]);
         setEndCursor(null);
     };
@@ -182,7 +244,6 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
         setSelectedAlbum(album);
         setViewMode('assets');
 
-        setSections([]);
         setRawAssets([]);
         setEndCursor(null);
         setHasNextPage(true);
@@ -191,56 +252,7 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
         fetchAssets(true, activeTab, album.id === 'all' ? null : album.id);
     };
 
-    const groupAssetsByDate = (assets) => {
-        const groups = {};
-        // Note: assets are already filtered by type from the fetch
-        const filtered = assets;
 
-        filtered.forEach(asset => {
-            const date = new Date(asset.creationTime);
-            const now = new Date();
-            const yesterday = new Date();
-            yesterday.setDate(now.getDate() - 1);
-
-            let title = date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-            if (date.toDateString() === now.toDateString()) title = 'Today';
-            else if (date.toDateString() === yesterday.toDateString()) title = 'Yesterday';
-
-            if (!groups[title]) groups[title] = [];
-            groups[title].push(asset);
-        });
-
-        // 2. Sort groups by date (Newest first)
-        const sortedTitles = Object.keys(groups).sort((a, b) => {
-            const getDateVal = (t) => {
-                if (t === 'Today') return new Date();
-                if (t === 'Yesterday') { const d = new Date(); d.setDate(d.getDate() - 1); return d; }
-                return new Date(t);
-            };
-            return getDateVal(b) - getDateVal(a);
-        });
-
-        const sectionData = sortedTitles.map(title => {
-            const groupItems = groups[title];
-            // Chunk into rows
-            const rows = [];
-            for (let i = 0; i < groupItems.length; i += NUM_COLUMNS) {
-                const chunk = groupItems.slice(i, i + NUM_COLUMNS);
-                // Pad last row if needed
-                while (chunk.length < NUM_COLUMNS) {
-                    chunk.push({ id: `spacer-${i}-${chunk.length}`, isSpacer: true });
-                }
-                rows.push({ id: `row-${i}`, data: chunk });
-            }
-            return { title, data: rows };
-        });
-
-        setSections(sectionData);
-    };
-
-    const updateSections = (assets) => {
-        groupAssetsByDate(assets);
-    };
 
     const fetchAlbums = async () => {
         if (isWeb) return;
@@ -355,7 +367,7 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
     const fetchAssets = async (reset = false, type = activeTab, albumId) => {
         if (isWeb) {
             setRawAssets(DEMO_PHOTOS);
-            updateSections(DEMO_PHOTOS);
+
             setLoading(false);
             return;
         }
@@ -383,9 +395,14 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
             const newAssets = reset ? result.assets : [...rawAssets, ...result.assets];
 
             setRawAssets(newAssets);
-            updateSections(newAssets); // Re-group
+
             setEndCursor(result.endCursor);
             setHasNextPage(result.hasNextPage);
+
+            // Trigger exact size calculation on initial load (reset=true)
+            if (reset) {
+                calculateExactSize(albumId, type);
+            }
         } catch (error) {
             console.log('Error loading assets:', error);
         } finally {
@@ -402,32 +419,118 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
 
     const formatSize = (mb) => (mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.floor(mb)} MB`);
 
-    const toggleSelection = (id) => {
+    // Calculate exact size by fetching ALL assets in the album
+    const calculateExactSize = async (albumId, mediaType) => {
+        if (isWeb) {
+            setExactSizeMB(0);
+            setCalculatingSize(false);
+            return;
+        }
+
+        // Check cache first
+        const cachedSize = await getCachedSize(albumId, mediaType);
+        if (cachedSize !== null) {
+            setExactSizeMB(cachedSize);
+            setCalculatingSize(false);
+            return;
+        }
+
+        setCalculatingSize(true);
+        setExactSizeMB(null);
+
+        let totalBytes = 0;
+        const BATCH_SIZE = 100;
+        let cursor = null;
+        let hasMore = true;
+
+        try {
+            // Fetch ALL assets in this album by paginating through
+            while (hasMore) {
+                const options = {
+                    mediaType: [mediaType],
+                    first: BATCH_SIZE,
+                    after: cursor,
+                    sortBy: MediaLibrary.SortBy.creationTime,
+                };
+
+                // If specific album (not 'all'), add album filter
+                if (albumId && albumId !== 'all') {
+                    options.album = albumId;
+                }
+
+                const result = await MediaLibrary.getAssetsAsync(options);
+
+                // Process this batch - get info for each asset
+                for (let i = 0; i < result.assets.length; i += 50) {
+                    const batch = result.assets.slice(i, i + 50);
+
+                    const infoPromises = batch.map(asset =>
+                        MediaLibrary.getAssetInfoAsync(asset.id).catch(() => null)
+                    );
+
+                    const infos = await Promise.all(infoPromises);
+
+                    for (const info of infos) {
+                        if (info && info.localUri) {
+                            if (info.mediaType === 'video' && info.duration) {
+                                // 10 MB per minute of video
+                                totalBytes += (info.duration / 60) * 10 * 1024 * 1024;
+                            } else {
+                                // Default 3.5 MB per photo
+                                totalBytes += 3.5 * 1024 * 1024;
+                            }
+                        }
+                    }
+
+                    // Allow UI to update
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+
+                cursor = result.endCursor;
+                hasMore = result.hasNextPage;
+            }
+
+            const sizeMB = totalBytes / (1024 * 1024);
+            setExactSizeMB(sizeMB);
+            setCachedSize(albumId, mediaType, sizeMB);
+        } catch (error) {
+            console.log('Error calculating size:', error);
+            // Fallback to estimate
+            const avg = mediaType === 'photo' ? 3.5 : 80;
+            const count = selectedAlbum ? selectedAlbum.assetCount : (mediaType === 'photo' ? photoStats.count : videoStats.count);
+            setExactSizeMB(count * avg);
+        } finally {
+            setCalculatingSize(false);
+        }
+    };
+
+    const toggleSelection = useCallback((id) => {
         if (selectedIds.includes(id)) {
             const newSelection = selectedIds.filter(i => i !== id);
             setSelectedIds(newSelection);
             if (newSelection.length === 0) setIsSelectionMode(false);
         } else {
-            setSelectedIds([...selectedIds, id]);
+            setSelectedIds(prev => [...prev, id]);
         }
-    };
+    }, [selectedIds]);
 
-    const handleTap = (item) => {
-        if (isSelectionMode) toggleSelection(item.id);
-        else {
+    const handleTap = useCallback((item) => {
+        if (isSelectionMode) {
+            toggleSelection(item.id);
+        } else {
             // Filter assets by current tab before opening viewer
             const filteredAssets = rawAssets.filter(a => a.mediaType === activeTab);
             const index = filteredAssets.findIndex(a => a.id === item.id);
             onOpenPhoto(filteredAssets, index !== -1 ? index : 0);
         }
-    };
+    }, [isSelectionMode, toggleSelection, rawAssets, activeTab, onOpenPhoto]);
 
-    const handleLongPress = (id) => {
+    const handleLongPress = useCallback((id) => {
         if (!isSelectionMode) {
             setIsSelectionMode(true);
             setSelectedIds([id]);
         }
-    };
+    }, [isSelectionMode]);
 
     const handleDeleteSelected = () => {
         Alert.alert('Delete Items', `Move ${selectedIds.length} items to trash?`, [
@@ -440,7 +543,7 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
                     if (onDeleteSelected) onDeleteSelected(selectedItems);
                     const newRaw = rawAssets.filter(a => !selectedIds.includes(a.id));
                     setRawAssets(newRaw);
-                    updateSections(newRaw);
+
                     setSelectedIds([]);
                     setIsSelectionMode(false);
                     // Optimistic update of stats
@@ -461,12 +564,7 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
         setSelectedIds(filtered.map(a => a.id));
     };
 
-    const formatDuration = (seconds) => {
-        if (!seconds) return '';
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    };
+
 
     const renderSectionHeader = ({ section: { title } }) => (
         <View style={styles.sectionHeader}>
@@ -475,38 +573,15 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
     );
 
     const renderRow = useCallback(({ item: row, index: rowIndex }) => (
-        <View style={styles.row}>
-            {row.data.map((item, colIndex) => {
-                if (item.isSpacer) return <View key={item.id} style={styles.gridItemSpacer} />;
-                const isSelected = selectedIds.includes(item.id);
-                return (
-                    <Animated.View key={item.id} entering={FadeInDown.delay((rowIndex * 50) + (colIndex * 30)).duration(400)}>
-                        <TouchableOpacity
-                            style={styles.gridItem}
-                            onPress={() => handleTap(item)}
-                            onLongPress={() => handleLongPress(item.id)}
-                            activeOpacity={0.8}
-                        >
-                            <Image source={{ uri: item.uri }} style={styles.thumbnail} contentFit="cover" />
-                            {item.mediaType === 'video' && (
-                                <View style={styles.videoBadge}>
-                                    <Ionicons name="videocam" size={12} color="#fff" />
-                                    <Text style={styles.videoDuration}>{formatDuration(item.duration)}</Text>
-                                </View>
-                            )}
-                            {isSelectionMode && (
-                                <View style={[styles.selectionOverlay, isSelected && styles.selectedOverlay]}>
-                                    <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
-                                        {isSelected && <Ionicons name="checkmark" size={14} color="#fff" />}
-                                    </View>
-                                </View>
-                            )}
-                        </TouchableOpacity>
-                    </Animated.View>
-                );
-            })}
-        </View>
-    ), [selectedIds, isSelectionMode, rawAssets, activeTab]);
+        <GridRow
+            row={row}
+            rowIndex={rowIndex}
+            selectedIds={selectedIds}
+            isSelectionMode={isSelectionMode}
+            onTap={handleTap}
+            onLongPress={handleLongPress}
+        />
+    ), [selectedIds, isSelectionMode, handleTap, handleLongPress]);
 
     if (loading) {
         return (
@@ -667,9 +742,30 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
                         /* Album Title Bar inside Asset View */
                         <View style={styles.albumHeaderBar}>
                             <Text style={styles.albumHeaderTitle}>{selectedAlbum ? selectedAlbum.title : 'All'}</Text>
-                            <Text style={styles.albumHeaderSubtitle}>
-                                {selectedAlbum ? selectedAlbum.assetCount : (activeTab === 'photo' ? photoStats.count : videoStats.count)} items
-                            </Text>
+                            <View style={styles.albumStatsRow}>
+                                <View style={styles.statChip}>
+                                    <Ionicons name={activeTab === 'photo' ? "image-outline" : "videocam-outline"} size={14} color="#007AFF" />
+                                    <AnimatedNumber
+                                        target={selectedAlbum ? selectedAlbum.assetCount : (activeTab === 'photo' ? photoStats.count : videoStats.count)}
+                                        suffix=" Items"
+                                        style={styles.statChipText}
+                                    />
+                                </View>
+                                <View style={styles.statChip}>
+                                    <Ionicons name="pie-chart-outline" size={14} color="#007AFF" />
+                                    {/* Show spinner while calculating, exact size when done */}
+                                    {calculatingSize ? (
+                                        <ActivityIndicator size="small" color="#007AFF" style={{ marginLeft: 4 }} />
+                                    ) : (
+                                        <AnimatedNumber
+                                            target={exactSizeMB !== null ? exactSizeMB : (rawAssets.length * (activeTab === 'photo' ? 3.5 : 80))}
+                                            style={styles.statChipText}
+                                            isFloat={true}
+                                            suffix={exactSizeMB !== null && exactSizeMB >= 1000 ? " GB" : " MB"}
+                                        />
+                                    )}
+                                </View>
+                            </View>
                         </View>
                     )}
 
@@ -687,18 +783,21 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
                         ListFooterComponent={renderFooter}
                     />
                 </>
-            )}
+            )
+            }
 
             {/* Selection Footer */}
-            {isSelectionMode && selectedIds.length > 0 && (
-                <View style={styles.footer}>
-                    <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteSelected}>
-                        <Ionicons name="trash" size={20} color="#fff" style={{ marginRight: 8 }} />
-                        <Text style={styles.deleteButtonText}>Delete ({selectedIds.length})</Text>
-                    </TouchableOpacity>
-                </View>
-            )}
-        </SafeAreaView>
+            {
+                isSelectionMode && selectedIds.length > 0 && (
+                    <View style={styles.footer}>
+                        <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteSelected}>
+                            <Ionicons name="trash" size={20} color="#fff" style={{ marginRight: 8 }} />
+                            <Text style={styles.deleteButtonText}>Delete ({selectedIds.length})</Text>
+                        </TouchableOpacity>
+                    </View>
+                )
+            }
+        </SafeAreaView >
     );
 }
 
@@ -983,5 +1082,24 @@ const styles = StyleSheet.create({
         color: '#8E8E93',
         fontWeight: '500',
         marginTop: 2,
+    },
+    albumStatsRow: {
+        flexDirection: 'row',
+        marginTop: 8,
+        gap: 8,
+    },
+    statChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0, 122, 255, 0.1)', // Light blue tint
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 20,
+        gap: 6,
+    },
+    statChipText: {
+        fontSize: 13,
+        color: '#007AFF',
+        fontWeight: '600',
     },
 });

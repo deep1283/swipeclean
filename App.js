@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Alert, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as MediaLibrary from 'expo-media-library';
@@ -7,6 +7,9 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import GalleryScreen from './src/screens/GalleryScreen';
 import PhotoViewer from './src/screens/PhotoViewer';
 import TrashScreen from './src/screens/TrashScreen';
+import ErrorBoundary from './src/components/ErrorBoundary';
+import { getItem, setItem, STORAGE_KEYS } from './src/utils/storage';
+import { invalidateSizeCache } from './src/utils/sizeCache';
 
 const isWeb = Platform.OS === 'web';
 
@@ -20,10 +23,30 @@ export default function App() {
   const [viewerIndex, setViewerIndex] = useState(0);
 
   useEffect(() => {
-    if (!isWeb) {
-      checkPermission();
-    }
+    const initialize = async () => {
+      if (!isWeb) {
+        checkPermission();
+      }
+      // Load trash from storage
+      const savedTrash = await getItem(STORAGE_KEYS.TRASH_ITEMS);
+      if (savedTrash && Array.isArray(savedTrash)) {
+        // Filter out expired items (older than 3 days)
+        const validItems = savedTrash.filter(item => {
+          const expiresAt = new Date(item.expiresAt).getTime();
+          return expiresAt > Date.now();
+        });
+        setTrashedItems(validItems);
+      }
+    };
+    initialize();
   }, []);
+
+  // Save trash to storage whenever it changes
+  useEffect(() => {
+    if (!isWeb) {
+      setItem(STORAGE_KEYS.TRASH_ITEMS, trashedItems);
+    }
+  }, [trashedItems]);
 
   const checkPermission = async () => {
     try {
@@ -88,9 +111,6 @@ export default function App() {
   };
 
   const openPhotoViewer = (assets, index) => {
-    console.log('openPhotoViewer called');
-    console.log('Assets count:', assets ? assets.length : 'null');
-    console.log('Index:', index);
     if (!assets || assets.length === 0) {
       console.error('No assets passed to viewer!');
       return;
@@ -129,36 +149,38 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={styles.appContainer}>
-        {currentScreen === 'gallery' && (
-          <GalleryScreen
-            onOpenPhoto={openPhotoViewer}
-            onOpenTrash={() => setCurrentScreen('trash')}
-            trashedCount={trashedItems.length}
-            onDeleteSelected={(items) => {
-              items.forEach(item => addToTrash(item));
-            }}
-          />
-        )}
-        {currentScreen === 'viewer' && (
-          <PhotoViewer
-            assets={viewerAssets}
-            initialIndex={viewerIndex}
-            onClose={() => setCurrentScreen('gallery')}
-            onTrash={addToTrash}
-          />
-        )}
-        {currentScreen === 'trash' && (
-          <TrashScreen
-            onBack={() => setCurrentScreen('gallery')}
-            items={trashedItems}
-            onRestore={restoreFromTrash}
-            onDelete={deleteFromTrash}
-            onEmptyTrash={emptyTrash}
-          />
-        )}
-        <StatusBar style={currentScreen === 'viewer' ? 'light' : 'dark'} />
-      </View>
+      <ErrorBoundary>
+        <View style={styles.appContainer}>
+          {currentScreen === 'gallery' && (
+            <GalleryScreen
+              onOpenPhoto={openPhotoViewer}
+              onOpenTrash={() => setCurrentScreen('trash')}
+              trashedCount={trashedItems.length}
+              onDeleteSelected={(items) => {
+                items.forEach(item => addToTrash(item));
+              }}
+            />
+          )}
+          {currentScreen === 'viewer' && (
+            <PhotoViewer
+              assets={viewerAssets}
+              initialIndex={viewerIndex}
+              onClose={() => setCurrentScreen('gallery')}
+              onTrash={addToTrash}
+            />
+          )}
+          {currentScreen === 'trash' && (
+            <TrashScreen
+              onBack={() => setCurrentScreen('gallery')}
+              items={trashedItems}
+              onRestore={restoreFromTrash}
+              onDelete={deleteFromTrash}
+              onEmptyTrash={emptyTrash}
+            />
+          )}
+          <StatusBar style={currentScreen === 'viewer' ? 'light' : 'dark'} />
+        </View>
+      </ErrorBoundary>
     </GestureHandlerRootView>
   );
 }
