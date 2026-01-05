@@ -9,9 +9,11 @@ import Animated, {
 } from 'react-native-reanimated';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const NUM_COLUMNS = 4; // For assets
-const ASSET_SPACING = 2;
-const ASSET_SIZE = (SCREEN_WIDTH - (ASSET_SPACING * (NUM_COLUMNS - 1))) / NUM_COLUMNS;
+const NUM_COLUMNS = 3;
+const GRID_PADDING = 20;
+const ASSET_SPACING = 4;
+const AVAILABLE_WIDTH = SCREEN_WIDTH - (GRID_PADDING * 2);
+const ASSET_SIZE = (AVAILABLE_WIDTH - (ASSET_SPACING * (NUM_COLUMNS - 1))) / NUM_COLUMNS;
 
 const SkeletonItem = ({ style }) => {
     const opacity = useSharedValue(0.3);
@@ -67,19 +69,19 @@ const styles = StyleSheet.create({
     },
     // Album Styles
     albumGrid: {
-        padding: 15,
+        padding: 20,
         flexDirection: 'row',
         flexWrap: 'wrap',
         justifyContent: 'space-between',
     },
     albumCard: {
-        width: '48%',
+        width: '47%',
         marginBottom: 20,
     },
     albumCover: {
         width: '100%',
-        height: 160,
-        borderRadius: 20,
+        height: 170, // Match new height
+        borderRadius: 16,
         marginBottom: 10,
     },
     albumTextTitle: {
@@ -98,9 +100,12 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: ASSET_SPACING,
+        paddingHorizontal: 20,
+        marginBottom: 4,
     },
     assetItem: {
         width: ASSET_SIZE,
         height: ASSET_SIZE,
+        borderRadius: 8,
     },
 });

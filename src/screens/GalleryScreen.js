@@ -24,8 +24,10 @@ import { AlbumSkeleton, AssetSkeleton } from '../components/SkeletonLoader';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const NUM_COLUMNS = 3;
-const SPACING = 2;
-const ITEM_SIZE = (SCREEN_WIDTH - (SPACING * (NUM_COLUMNS - 1))) / NUM_COLUMNS;
+const GRID_PADDING = 20;
+const SPACING = 4; // Slightly larger gap
+const AVAILABLE_WIDTH = SCREEN_WIDTH - (GRID_PADDING * 2);
+const ITEM_SIZE = (AVAILABLE_WIDTH - (SPACING * (NUM_COLUMNS - 1))) / NUM_COLUMNS;
 const isWeb = Platform.OS === 'web';
 
 // Demo photos for web fallback
@@ -612,7 +614,7 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
                         <View style={styles.albumInfo}>
                             <Text style={styles.albumTitle}>All {activeTab === 'photo' ? 'Photos' : 'Videos'}</Text>
                             <Text style={styles.albumSubtitle}>
-                                {activeTab === 'photo' ? photoStats.count : videoStats.count} items • {formatSize(activeTab === 'photo' ? photoStats.sizeMB : videoStats.sizeMB)}
+                                {activeTab === 'photo' ? photoStats.count : videoStats.count} items
                             </Text>
                         </View>
                     </TouchableOpacity>
@@ -641,7 +643,7 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
                                 <View style={styles.albumInfo}>
                                     <Text style={styles.albumTitle} numberOfLines={1}>{album.title}</Text>
                                     <Text style={styles.albumSubtitle}>
-                                        {album.assetCount} items • {getAlbumSizeLabel(album.assetCount, activeTab)}
+                                        {album.assetCount} items
                                     </Text>
                                 </View>
                             </TouchableOpacity>
@@ -703,20 +705,15 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: '#F2F2F7', // iOS grouped background style
         paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
     },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingVertical: 15,
+    // Header & Tabs
+    headerContainer: {
+        // Sticky/floating feel
+        backgroundColor: '#F2F2F7',
+        zIndex: 10,
+        paddingBottom: 10,
     },
     header: {
         flexDirection: 'row',
@@ -728,147 +725,143 @@ const styles = StyleSheet.create({
     },
     tabContainer: {
         flexDirection: 'row',
-        backgroundColor: '#f0f0f0',
-        borderRadius: 20,
-        padding: 4,
+        backgroundColor: 'rgba(118, 118, 128, 0.12)', // iOS segmented control bg
+        borderRadius: 9, // Rounded specific
+        padding: 2,
     },
     tab: {
         paddingVertical: 6,
-        paddingHorizontal: 16,
-        borderRadius: 16,
+        paddingHorizontal: 24, // Wider click area
+        borderRadius: 7,
     },
     activeTab: {
         backgroundColor: '#fff',
         shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.12,
         shadowRadius: 2,
         elevation: 2,
     },
     tabText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#888',
+        fontSize: 13,
+        fontWeight: '500',
+        color: '#000',
     },
     activeTabText: {
-        color: '#000',
-    },
-    title: {
-        fontSize: 28,
-        fontWeight: '800',
-        color: '#000',
-        letterSpacing: -0.5,
-    },
-    subtitle: {
-        fontSize: 14,
-        color: '#888',
-        fontWeight: '500',
-        marginTop: 2,
+        fontWeight: '600',
     },
     iconButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: '#f5f5f5',
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#fff',
         justifyContent: 'center',
         alignItems: 'center',
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 1,
+        elevation: 2,
     },
+    // Badges
     badge: {
         position: 'absolute',
-        top: -2,
-        right: -2,
-        backgroundColor: '#FF3B30',
+        top: -4,
+        right: -4,
+        backgroundColor: '#FF3B30', // System Red
         borderRadius: 10,
-        minWidth: 20,
-        height: 20,
+        minWidth: 18,
+        height: 18,
         justifyContent: 'center',
         alignItems: 'center',
-        borderWidth: 2,
+        borderWidth: 1.5,
         borderColor: '#fff',
     },
     badgeText: {
         color: '#fff',
         fontSize: 10,
-        fontWeight: 'bold',
-    },
-    statsContainer: {
-        flexDirection: 'row',
-        backgroundColor: '#f8f9fa',
-        marginHorizontal: 20,
-        marginBottom: 15,
-        padding: 12,
-        borderRadius: 16,
-        justifyContent: 'space-between',
-    },
-    statItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    statValue: {
-        fontSize: 16,
         fontWeight: '700',
-        color: '#000',
     },
-    statLabel: {
-        fontSize: 12,
-        color: '#666',
-        marginTop: 2,
-    },
-    statDivider: {
-        width: 1,
-        backgroundColor: '#e1e4e8',
-        height: '80%',
-        alignSelf: 'center',
-    },
-    selectionHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingBottom: 15,
-        borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0',
-        marginBottom: 10,
-    },
-    selectionTitle: {
-        fontSize: 17,
-        fontWeight: '600',
-    },
-    actionButtonText: {
-        fontSize: 16,
-        color: '#007AFF',
-        fontWeight: '500',
-    },
-    listContent: {
+    // Album List
+    albumsGrid: {
+        padding: 20,
         paddingBottom: 100,
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
     },
+    albumCard: {
+        width: '47%', // slightly smaller to be safe
+        marginBottom: 20, // Add bottom margin back since we removed gap
+    },
+    albumCoverContainer: {
+        width: '100%',
+        height: 170, // Slightly taller
+        borderRadius: 16,
+        backgroundColor: '#fff',
+        marginBottom: 10,
+        // Shadow for depth
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+        elevation: 6,
+    },
+    albumCover: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 16,
+    },
+    albumPlaceholderGradient: {
+        flex: 1,
+        borderRadius: 16,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    albumInfo: {
+        paddingHorizontal: 4,
+    },
+    albumTitle: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#000',
+        marginBottom: 2,
+        letterSpacing: -0.2, // Tighter tracking
+    },
+    albumSubtitle: {
+        fontSize: 13,
+        color: '#8E8E93', // iOS gray
+        fontWeight: '400',
+    },
+    // Section List Headers
     sectionHeader: {
-        paddingHorizontal: 15,
-        paddingVertical: 10,
-        backgroundColor: 'rgba(255,255,255,0.95)',
-        borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0',
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        backgroundColor: 'rgba(242, 242, 247, 0.95)', // Blur illusion
     },
     sectionHeaderText: {
         fontSize: 18,
         fontWeight: '700',
-        color: '#333',
+        color: '#1C1C1E',
+        letterSpacing: -0.4,
     },
+    // Asset Grid
     row: {
         flexDirection: 'row',
-        gap: SPACING,
-        marginBottom: SPACING,
+        marginBottom: 4, // Match SPACING
+        paddingHorizontal: 20, // GRID_PADDING
+        gap: 4, // SPACING
     },
     gridItem: {
         width: ITEM_SIZE,
         height: ITEM_SIZE,
-        backgroundColor: '#f0f0f0',
+        borderRadius: 8, // Little rounded corners for pics
+        backgroundColor: '#eee',
         overflow: 'hidden',
     },
     gridItemSpacer: {
         width: ITEM_SIZE,
         height: ITEM_SIZE,
-        backgroundColor: 'transparent',
     },
     thumbnail: {
         flex: 1,
@@ -877,49 +870,72 @@ const styles = StyleSheet.create({
     },
     videoBadge: {
         position: 'absolute',
-        bottom: 5,
-        right: 5,
+        bottom: 6,
+        right: 6,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: 'rgba(0,0,0,0.6)',
+        backgroundColor: 'rgba(0,0,0,0.5)',
         paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 4,
+        paddingVertical: 3,
+        borderRadius: 6,
+        backdropFilter: 'blur(10px)', // Web only but good practice
     },
     videoDuration: {
         color: '#fff',
-        fontSize: 10,
+        fontSize: 11,
         fontWeight: '600',
         marginLeft: 4,
     },
+    // Selection Overlay
     selectionOverlay: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(255,255,255,0.3)',
+        backgroundColor: 'rgba(0,0,0,0.2)', // Darken slightly
         justifyContent: 'flex-end',
         alignItems: 'flex-end',
         padding: 8,
     },
     selectedOverlay: {
-        backgroundColor: 'rgba(0, 122, 255, 0.2)',
+        backgroundColor: 'rgba(0, 122, 255, 0.3)', // System Blue tint
     },
     checkbox: {
-        width: 24,
-        height: 24,
-        borderRadius: 12,
-        borderWidth: 2,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        borderWidth: 1.5,
         borderColor: '#fff',
-        backgroundColor: 'rgba(0,0,0,0.2)',
+        backgroundColor: 'rgba(0,0,0,0.1)',
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 3.84,
-        elevation: 5,
     },
     checkboxSelected: {
         backgroundColor: '#007AFF',
         borderColor: '#007AFF',
+    },
+    // Selection Bar
+    selectionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingBottom: 15,
+        borderBottomWidth: 0, // Clean look
+        backgroundColor: '#F2F2F7',
+    },
+    selectionTitle: {
+        fontSize: 17,
+        fontWeight: '600',
+        color: '#000',
+    },
+    actionButtonText: {
+        fontSize: 17,
+        color: '#007AFF',
+        fontWeight: '400',
+    },
+    // Footer / Loading
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     footer: {
         position: 'absolute',
@@ -927,15 +943,10 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         padding: 20,
-        backgroundColor: '#fff',
-        borderTopWidth: 1,
-        borderTopColor: '#f0f0f0',
-        paddingBottom: 40,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: -4 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 10,
+        backgroundColor: 'rgba(255,255,255,0.9)',
+        borderTopWidth: 0.5,
+        borderTopColor: 'rgba(0,0,0,0.1)',
+        paddingBottom: 30,
     },
     deleteButton: {
         backgroundColor: '#FF3B30',
@@ -943,80 +954,33 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         paddingVertical: 14,
-        borderRadius: 12,
+        borderRadius: 14, // Softer corners
+        shadowColor: "#FF3B30",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 6,
     },
     deleteButtonText: {
         color: '#fff',
         fontSize: 17,
         fontWeight: '600',
     },
-    // Album Grid Styles
-    albumsGrid: {
-        padding: 15,
-        paddingBottom: 40,
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        justifyContent: 'space-between',
-    },
-    albumCard: {
-        width: '48%',
-        marginBottom: 20,
-        backgroundColor: 'transparent',
-    },
-    albumCoverContainer: {
-        width: '100%',
-        height: 160,
-        borderRadius: 20,
-        overflow: 'hidden',
-        backgroundColor: '#f0f0f0',
-        marginBottom: 10,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 5,
-        elevation: 5,
-    },
-    albumCover: {
-        width: '100%',
-        height: '100%',
-    },
-    albumPlaceholder: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#f8f8f8',
-    },
-    albumPlaceholderGradient: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    albumInfo: {
-        paddingHorizontal: 5,
-    },
-    albumTitle: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#000',
-        marginBottom: 2,
-    },
-    albumSubtitle: {
-        fontSize: 13,
-        color: '#888',
-        fontWeight: '500',
-    },
+    // Missing Album Header Styles
     albumHeaderBar: {
         paddingHorizontal: 20,
+        paddingTop: 10,
         paddingBottom: 15,
     },
     albumHeaderTitle: {
         fontSize: 24,
         fontWeight: '800',
         color: '#000',
+        letterSpacing: -0.5,
     },
     albumHeaderSubtitle: {
         fontSize: 14,
-        color: '#666',
+        color: '#8E8E93',
         fontWeight: '500',
         marginTop: 2,
     },
