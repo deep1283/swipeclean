@@ -20,9 +20,11 @@ import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AlbumSkeleton, AssetSkeleton } from '../components/SkeletonLoader';
-import { getCachedSize, setCachedSize, invalidateSizeCache } from '../utils/sizeCache';
-import GridRow from '../components/GridRow';
 
+
+import GridRow from '../components/GridRow';
+import AdBanner from '../components/AdBanner';
+import { isPremiumUser, setPremiumStatus } from '../utils/premium';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const NUM_COLUMNS = 3;
@@ -137,78 +139,115 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
     const [selectedIds, setSelectedIds] = useState([]);
     const [isSelectionMode, setIsSelectionMode] = useState(false);
 
-    // Album State
-    const [albums, setAlbums] = useState([]);
+    // Cache State for Albums and Assets
+    // Structure: { photo: [...], video: [...] }
+    const [cachedAlbums, setCachedAlbums] = useState({ photo: null, video: null });
+    const [cachedAssets, setCachedAssets] = useState({ photo: [], video: [] });
+
+    // Derived state for current view
+    // Derived state for current view
+    const albums = useMemo(() => cachedAlbums[activeTab] || [], [cachedAlbums, activeTab]);
+    const [currentAlbumAssets, setCurrentAlbumAssets] = useState([]);
+
     const [selectedAlbum, setSelectedAlbum] = useState(null); // Full album object for display
     const [albumCovers, setAlbumCovers] = useState({});
-    const [allAlbumCover, setAllAlbumCover] = useState(null);
+    const [allAlbumCovers, setAllAlbumCovers] = useState({ photo: null, video: null });
+    const [isPremium, setIsPremium] = useState(false);
 
-    // Pagination State
-    const [endCursor, setEndCursor] = useState(null);
-    const [hasNextPage, setHasNextPage] = useState(true);
+    // Load premium status on mount
+    useEffect(() => {
+        checkPremiumStatus();
+    }, []);
+
+    const checkPremiumStatus = async () => {
+        const status = await isPremiumUser();
+        setIsPremium(status);
+    };
+
+    const handleRemoveAds = () => {
+        Alert.alert(
+            "Remove Ads",
+            "Remove all ads for a one-time payment of ₹100?",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Pay ₹100",
+                    onPress: async () => {
+                        // Simulate purchase
+                        await setPremiumStatus(true);
+                        setIsPremium(true);
+                        Alert.alert("Success!", "Ads have been removed. Thank you for your support!");
+                    }
+                }
+            ]
+        );
+    };
+
+    // Pagination State (Per tab)
+    const [pagination, setPagination] = useState({
+        photo: { endCursor: null, hasNextPage: true },
+        video: { endCursor: null, hasNextPage: true }
+    });
+    const [currentAlbumPagination, setCurrentAlbumPagination] = useState({ endCursor: null, hasNextPage: true });
+
+    // Raw Assets Memo - Switches between cached 'All' view and specific album view
+    const rawAssets = useMemo(() => {
+        if (selectedAlbum && selectedAlbum.id !== 'all') {
+            return currentAlbumAssets;
+        }
+        return cachedAssets[activeTab] || [];
+    }, [cachedAssets, activeTab, selectedAlbum, currentAlbumAssets]);
     const [isFetchingMore, setIsFetchingMore] = useState(false);
 
     // Real Stats State
     const [photoStats, setPhotoStats] = useState({ count: 0, sizeMB: 0 });
     const [videoStats, setVideoStats] = useState({ count: 0, sizeMB: 0 });
-    const [rawAssets, setRawAssets] = useState([]);
 
     // Memoize sections calculation
     const sections = useMemo(() => {
         return groupAssetsByDate(rawAssets);
     }, [rawAssets]);
 
-    // Exact Size Calculation State
-    const [exactSizeMB, setExactSizeMB] = useState(null); // null = not calculated yet
-    const [calculatingSize, setCalculatingSize] = useState(false);
+    // Exact Size Calculation State - REMOVED
 
     useEffect(() => {
         // Initial Load
-        fetchAlbums();
-        fetchRealStats();
+        loadInitialData();
     }, []);
 
+    const loadInitialData = async () => {
+        setLoading(true);
+        await Promise.all([
+            fetchAlbums('photo'),
+            fetchRealStats()
+        ]);
+        // Pre-fetch video albums in background
+        fetchAlbums('video');
+        setLoading(false);
+    };
+
+    // Tab Switch Effect
     useEffect(() => {
-        let isMounted = true;
-
-        const refreshData = async () => {
-            // When tab changes, reset and fetch new type
+        // Handle tab switch
+        // If we have cached albums for the new tab, we don't need to show loading skeleton
+        if (!cachedAlbums[activeTab]) {
             setLoading(true);
+            fetchAlbums(activeTab).then(() => setLoading(false));
+            fetchRealStats(); // Update stats if needed
+        } else {
+            // Already cached, just ensure stats are fresh in background
+            fetchRealStats();
+        }
 
-            setRawAssets([]);
-            setEndCursor(null);
-            setHasNextPage(true);
+        // Always go back to albums view when main tab changes (optional choice, keeps nav clean)
+        setViewMode('albums');
+        setSelectedAlbum(null);
 
-            // Always go back to albums view when main tab changes
-            setViewMode('albums');
-            setSelectedAlbum(null);
-
-            // Fetch albums again to ensure correct counts/types
-            await fetchAlbums();
-            await fetchRealStats();
-
-            if (isMounted) setLoading(false);
-        };
-
-        refreshData();
-
-        return () => { isMounted = false; };
     }, [activeTab]);
 
     const handleTabPress = (tab) => {
         if (activeTab === tab) return;
-
-        // Instant feedback? Or Delay? 
-        // User requested: "tab switches instantly but the loading takes time. lets add a bit of delay so that they appear to be synced"
-        // Meaning: Don't switch the TAB UI instantly. Wait a bit, then switch, so the loading starts "closer" to the switch.
-
-        setLoading(true); // Start loading immediately to show something is happening? 
-        // Actually, if we set activeTab, the effect triggers loading: true.
-        // If we delay activeTab, nothing happens for X ms.
-
-        setTimeout(() => {
-            setActiveTab(tab);
-        }, 150); // 150ms delay
+        setActiveTab(tab);
     };
 
     useEffect(() => {
@@ -236,25 +275,41 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
     const handleBackToAlbums = () => {
         setViewMode('albums');
         setSelectedAlbum(null);
-        setRawAssets([]);
-        setEndCursor(null);
+        // We don't clear assets, we keep them cached/memoized
     };
 
     const handleAlbumSelect = (album) => {
         setSelectedAlbum(album);
         setViewMode('assets');
 
-        setRawAssets([]);
-        setEndCursor(null);
-        setHasNextPage(true);
-        setLoading(true);
-
-        fetchAssets(true, activeTab, album.id === 'all' ? null : album.id);
+        if (album.id === 'all') {
+            // If all, we already have it in cachedAssets[activeTab] (or it's loading)
+            // We don't need to do anything, rawAssets memo handles it.
+            // If empty, maybe trigger fetch?
+            if ((cachedAssets[activeTab] || []).length === 0) {
+                fetchAssets(true, activeTab, null);
+            }
+        } else {
+            // Specific album: Reset temp state and fetch
+            setCurrentAlbumAssets([]);
+            setCurrentAlbumPagination({ endCursor: null, hasNextPage: true });
+            fetchAssets(true, activeTab, album.id);
+        }
     };
 
+    // Update rawAssets memo
+    // We need to redefine 'rawAssets' for the rest of the component to work
+    // but the 'const rawAssets' ABOVE (line 159 in original, now line 36 in replacement) needs to change.
+    // I can't change it there easily without replacing the whole block.
+    // Let's handle it by updating 'fetchAssets' instead.
 
+    // Actually, simply: 
+    // If selectedAlbum is NOT null, we fetch into a transient list.
+    // If selectedAlbum IS null/all, we use cachedAssets.
+    // But 'rawAssets' variable needs to reflect this.
+    // I will use a ref or effect to manage this, or just update the logic below.
 
-    const fetchAlbums = async () => {
+    const fetchAlbums = async (type) => {
         if (isWeb) return;
         try {
             const permission = await MediaLibrary.requestPermissionsAsync();
@@ -264,55 +319,44 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
                 includeSmartAlbums: true,
             });
 
-            // Filter empty albums or small ones if desired
-            // Also filter by activeTab type since MediaLibrary returns mixed albums
             const filteredAlbums = [];
 
-            // Check each album content
             await Promise.all(fetchedAlbums.map(async (album) => {
                 if (album.assetCount === 0) return;
-
-                // Quick check if this album has ANY assets of the current type
                 const check = await MediaLibrary.getAssetsAsync({
                     album: album.id,
-                    mediaType: [activeTab],
+                    mediaType: [type],
                     first: 1,
                 });
 
                 if (check.totalCount > 0) {
-                    // It has valid assets for this tab
-                    // Update count to reflect ONLY this type
                     filteredAlbums.push({ ...album, assetCount: check.totalCount });
                 }
             }));
 
-            const sorted = filteredAlbums
-                .sort((a, b) => b.assetCount - a.assetCount);
+            const sorted = filteredAlbums.sort((a, b) => b.assetCount - a.assetCount);
 
-            setAlbums(sorted);
+            setCachedAlbums(prev => ({ ...prev, [type]: sorted }));
 
             // Fetch cover for "All" album (latest asset of current type)
             try {
                 const allCover = await MediaLibrary.getAssetsAsync({
                     first: 1,
-                    mediaType: [activeTab],
+                    mediaType: [type],
                     sortBy: MediaLibrary.SortBy.creationTime,
                 });
                 if (allCover.assets.length > 0) {
-                    setAllAlbumCover(allCover.assets[0].uri);
-                } else {
-                    setAllAlbumCover(null);
+                    setAllAlbumCovers(prev => ({ ...prev, [type]: allCover.assets[0].uri }));
                 }
             } catch (e) {
-                console.log('Error fetching all cover:', e);
+                // console.log('Error fetching all cover:', e);
             }
 
-            // Fetch covers for top albums (lazy)
             sorted.forEach(async (album) => {
                 const cover = await MediaLibrary.getAssetsAsync({
                     album: album.id,
                     first: 1,
-                    mediaType: [activeTab], // Use activeTab for cover too
+                    mediaType: [type],
                     sortBy: MediaLibrary.SortBy.creationTime,
                 });
                 if (cover.assets.length > 0) {
@@ -321,7 +365,7 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
             });
 
         } catch (e) {
-            console.log("Error fetching albums", e);
+            // console.log("Error fetching albums", e);
         }
     };
 
@@ -348,31 +392,25 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
             const realPhotoCount = photoData.totalCount;
             const realVideoCount = videoData.totalCount;
 
-            // 2. Smart Sampling for Size (Sample 20 random items)
-            // Note: We can only sample from the loaded batch safely without extra fetches.
-            // Ideally we'd fetch details for a few. For now, we'll use a smarter average.
-            // Avg Photo: 3.5 MB (High res)
-            // Avg Video: 80 MB (Variable, but safe estimate)
-            const estPhotoSize = realPhotoCount * 3.5;
-            const estVideoSize = realVideoCount * 85.0;
-
-            setPhotoStats({ count: realPhotoCount, sizeMB: estPhotoSize });
-            setVideoStats({ count: realVideoCount, sizeMB: estVideoSize });
+            setPhotoStats({ count: realPhotoCount, sizeMB: 0 });
+            setVideoStats({ count: realVideoCount, sizeMB: 0 });
 
         } catch (e) {
-            console.log("Failed to fetch real stats:", e);
+            // console.log("Failed to fetch real stats:", e);
         }
     }
 
     const fetchAssets = async (reset = false, type = activeTab, albumId) => {
         if (isWeb) {
-            setRawAssets(DEMO_PHOTOS);
-
+            setCachedAssets(prev => ({ ...prev, [type]: DEMO_PHOTOS }));
             setLoading(false);
             return;
         }
 
-        if (!reset && (!hasNextPage || isFetchingMore)) return;
+        const isSpecificAlbum = albumId && albumId !== 'all';
+        const currentPag = isSpecificAlbum ? currentAlbumPagination : pagination[type];
+
+        if (!reset && (!currentPag.hasNextPage || isFetchingMore)) return;
 
         if (!reset) setIsFetchingMore(true);
         else setLoading(true);
@@ -381,30 +419,40 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
             const params = {
                 mediaType: [type], // Fetch ONLY the active type
                 first: 100,
-                after: reset ? null : endCursor,
+                after: reset ? null : currentPag.endCursor,
                 sortBy: MediaLibrary.SortBy.creationTime,
             };
 
-            if (albumId) {
+            if (isSpecificAlbum) {
                 params.album = albumId;
             }
 
             const result = await MediaLibrary.getAssetsAsync(params);
 
-            // If reset, use new assets. If not, append.
-            const newAssets = reset ? result.assets : [...rawAssets, ...result.assets];
-
-            setRawAssets(newAssets);
-
-            setEndCursor(result.endCursor);
-            setHasNextPage(result.hasNextPage);
-
-            // Trigger exact size calculation on initial load (reset=true)
-            if (reset) {
-                calculateExactSize(albumId, type);
+            if (isSpecificAlbum) {
+                // Update Specific Album State
+                setCurrentAlbumAssets(prev => reset ? result.assets : [...prev, ...result.assets]);
+                setCurrentAlbumPagination({
+                    endCursor: result.endCursor,
+                    hasNextPage: result.hasNextPage
+                });
+            } else {
+                // Update Cached 'All' State
+                setCachedAssets(prev => ({
+                    ...prev,
+                    [type]: reset ? result.assets : [...prev[type], ...result.assets]
+                }));
+                setPagination(prev => ({
+                    ...prev,
+                    [type]: {
+                        endCursor: result.endCursor,
+                        hasNextPage: result.hasNextPage
+                    }
+                }));
             }
+
         } catch (error) {
-            console.log('Error loading assets:', error);
+            // console.log('Error loading assets:', error);
         } finally {
             setLoading(false);
             setIsFetchingMore(false);
@@ -419,90 +467,7 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
 
     const formatSize = (mb) => (mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.floor(mb)} MB`);
 
-    // Calculate exact size by fetching ALL assets in the album
-    const calculateExactSize = async (albumId, mediaType) => {
-        if (isWeb) {
-            setExactSizeMB(0);
-            setCalculatingSize(false);
-            return;
-        }
 
-        // Check cache first
-        const cachedSize = await getCachedSize(albumId, mediaType);
-        if (cachedSize !== null) {
-            setExactSizeMB(cachedSize);
-            setCalculatingSize(false);
-            return;
-        }
-
-        setCalculatingSize(true);
-        setExactSizeMB(null);
-
-        let totalBytes = 0;
-        const BATCH_SIZE = 100;
-        let cursor = null;
-        let hasMore = true;
-
-        try {
-            // Fetch ALL assets in this album by paginating through
-            while (hasMore) {
-                const options = {
-                    mediaType: [mediaType],
-                    first: BATCH_SIZE,
-                    after: cursor,
-                    sortBy: MediaLibrary.SortBy.creationTime,
-                };
-
-                // If specific album (not 'all'), add album filter
-                if (albumId && albumId !== 'all') {
-                    options.album = albumId;
-                }
-
-                const result = await MediaLibrary.getAssetsAsync(options);
-
-                // Process this batch - get info for each asset
-                for (let i = 0; i < result.assets.length; i += 50) {
-                    const batch = result.assets.slice(i, i + 50);
-
-                    const infoPromises = batch.map(asset =>
-                        MediaLibrary.getAssetInfoAsync(asset.id).catch(() => null)
-                    );
-
-                    const infos = await Promise.all(infoPromises);
-
-                    for (const info of infos) {
-                        if (info && info.localUri) {
-                            if (info.mediaType === 'video' && info.duration) {
-                                // 10 MB per minute of video
-                                totalBytes += (info.duration / 60) * 10 * 1024 * 1024;
-                            } else {
-                                // Default 3.5 MB per photo
-                                totalBytes += 3.5 * 1024 * 1024;
-                            }
-                        }
-                    }
-
-                    // Allow UI to update
-                    await new Promise(resolve => setTimeout(resolve, 0));
-                }
-
-                cursor = result.endCursor;
-                hasMore = result.hasNextPage;
-            }
-
-            const sizeMB = totalBytes / (1024 * 1024);
-            setExactSizeMB(sizeMB);
-            setCachedSize(albumId, mediaType, sizeMB);
-        } catch (error) {
-            console.log('Error calculating size:', error);
-            // Fallback to estimate
-            const avg = mediaType === 'photo' ? 3.5 : 80;
-            const count = selectedAlbum ? selectedAlbum.assetCount : (mediaType === 'photo' ? photoStats.count : videoStats.count);
-            setExactSizeMB(count * avg);
-        } finally {
-            setCalculatingSize(false);
-        }
-    };
 
     const toggleSelection = useCallback((id) => {
         if (selectedIds.includes(id)) {
@@ -588,6 +553,17 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
             <View style={styles.container}>
                 <View style={styles.headerContainer}>
                     <View style={styles.header}>
+                        <View style={styles.headerTopRow}>
+                            <View>
+                                {/* Spacer/Title area if needed, or just left align tabs */}
+                            </View>
+                            {!isPremium && (
+                                <TouchableOpacity onPress={handleRemoveAds} style={styles.premiumButton}>
+                                    <Ionicons name="diamond-outline" size={16} color="#FFD700" />
+                                    <Text style={styles.premiumText}>Remove Ads</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
                         <View style={styles.tabContainer}>
                             <TouchableOpacity
                                 style={[styles.tab, activeTab === 'photo' && styles.activeTab]}
@@ -678,8 +654,8 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
                         activeOpacity={0.9}
                     >
                         <View style={styles.albumCoverContainer}>
-                            {allAlbumCover ? (
-                                <Image source={{ uri: allAlbumCover }} style={styles.albumCover} contentFit="cover" />
+                            {allAlbumCovers[activeTab] ? (
+                                <Image source={{ uri: allAlbumCovers[activeTab] }} style={styles.albumCover} contentFit="cover" />
                             ) : (
                                 <LinearGradient colors={['#4facfe', '#00f2fe']} style={styles.albumPlaceholderGradient}>
                                     <Ionicons name={activeTab === 'photo' ? 'images' : 'videocam'} size={40} color="#fff" />
@@ -751,20 +727,6 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
                                         style={styles.statChipText}
                                     />
                                 </View>
-                                <View style={styles.statChip}>
-                                    <Ionicons name="pie-chart-outline" size={14} color="#007AFF" />
-                                    {/* Show spinner while calculating, exact size when done */}
-                                    {calculatingSize ? (
-                                        <ActivityIndicator size="small" color="#007AFF" style={{ marginLeft: 4 }} />
-                                    ) : (
-                                        <AnimatedNumber
-                                            target={exactSizeMB !== null ? exactSizeMB : (rawAssets.length * (activeTab === 'photo' ? 3.5 : 80))}
-                                            style={styles.statChipText}
-                                            isFloat={true}
-                                            suffix={exactSizeMB !== null && exactSizeMB >= 1000 ? " GB" : " MB"}
-                                        />
-                                    )}
-                                </View>
                             </View>
                         </View>
                     )}
@@ -797,6 +759,8 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
                     </View>
                 )
             }
+
+            <AdBanner />
         </SafeAreaView >
     );
 }

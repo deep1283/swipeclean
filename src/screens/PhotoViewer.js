@@ -143,7 +143,7 @@ function SwipeableAsset({ asset, onSwipeComplete, onUpdateSwipe, hasPrev, hasNex
     const videoRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
 
-    console.log('SwipeableAsset asset:', asset.id, asset.mediaType, asset.uri);
+    // console.log('SwipeableAsset asset:', asset.id, asset.mediaType, asset.uri);
 
     const togglePlayback = () => {
         setIsPlaying(!isPlaying);
@@ -164,7 +164,7 @@ function SwipeableAsset({ asset, onSwipeComplete, onUpdateSwipe, hasPrev, hasNex
                             onPlaybackStatusUpdate={(status) => {
                                 if (status.didJustFinish) setIsPlaying(false);
                             }}
-                            onError={(error) => console.log('Video Error:', error)}
+                            onError={(error) => {/* console.log('Video Error:', error) */ }}
                         />
                         <TouchableOpacity
                             style={styles.videoPlayButton}

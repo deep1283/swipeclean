@@ -14,19 +14,76 @@ import {
     BackHandler
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { InterstitialAd, AdEventType, TestIds } from 'react-native-google-mobile-ads';
+import { isPremiumUser } from '../utils/premium';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const NUM_COLUMNS = 3;
 const SPACING = 2; // Match GalleryScreen
 const ITEM_SIZE = (SCREEN_WIDTH - (SPACING * (NUM_COLUMNS - 1))) / NUM_COLUMNS;
 
+const adUnitId = __DEV__ ? TestIds.INTERSTITIAL : 'ca-app-pub-xxxxxxxxxxxxxxxx/yyyyyyyyyy';
+
+import ConfirmationModal from '../components/ConfirmationModal';
+
 export default function TrashScreen({ onBack, items, onRestore, onDelete, onEmptyTrash }) {
     const [selectedIds, setSelectedIds] = useState([]);
     const [isSelectionMode, setIsSelectionMode] = useState(false);
 
+    // Ad State
+    const [interstitial, setInterstitial] = useState(null);
+    const [adLoaded, setAdLoaded] = useState(false);
+
+    useEffect(() => {
+        const ad = InterstitialAd.createForAdRequest(adUnitId, {
+            requestNonPersonalizedAdsOnly: true,
+        });
+
+        const unsubscribe = ad.addAdEventListener(AdEventType.LOADED, () => {
+            setAdLoaded(true);
+        });
+
+        // Also listen for close to reload
+        const unsubscribeClosed = ad.addAdEventListener(AdEventType.CLOSED, () => {
+            ad.load(); // preload next one
+            setAdLoaded(false);
+        });
+
+        ad.load();
+        setInterstitial(ad);
+
+        return () => {
+            unsubscribe();
+            unsubscribeClosed();
+        };
+    }, []);
+
+    const showAdIfReady = async () => {
+        const premium = await isPremiumUser();
+        if (premium) return;
+
+        if (interstitial && adLoaded) {
+            interstitial.show();
+        }
+    };
+
+    // Modal State
+    const [modalVisible, setModalVisible] = useState(false);
+    const [modalConfig, setModalConfig] = useState({
+        title: '',
+        message: '',
+        confirmText: '',
+        onConfirm: () => { },
+        isDestructive: true
+    });
+
     // Handle Android Back Button
     useEffect(() => {
         const onBackPress = () => {
+            if (modalVisible) {
+                setModalVisible(false);
+                return true;
+            }
             onBack();
             return true; // Prevent default behavior (exit app)
         };
@@ -37,7 +94,7 @@ export default function TrashScreen({ onBack, items, onRestore, onDelete, onEmpt
         );
 
         return () => subscription.remove();
-    }, [onBack]);
+    }, [onBack, modalVisible]);
 
     // --- Helpers ---
     const getTimeRemaining = (expiresAt) => {
@@ -52,14 +109,18 @@ export default function TrashScreen({ onBack, items, onRestore, onDelete, onEmpt
     };
 
     const confirmEmptyTrash = () => {
-        Alert.alert(
-            'Empty Trash',
-            `Are you sure you want to permanently delete all ${items.length} items? This cannot be undone.`,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Delete All', style: 'destructive', onPress: onEmptyTrash },
-            ]
-        );
+        setModalConfig({
+            title: 'Empty Trash',
+            message: `Are you sure you want to permanently delete all ${items.length} items? This cannot be undone.`,
+            confirmText: 'Delete All',
+            isDestructive: true,
+            onConfirm: () => {
+                onEmptyTrash();
+                setModalVisible(false);
+                showAdIfReady();
+            }
+        });
+        setModalVisible(true);
     };
 
     // --- Selection Logic ---
@@ -97,22 +158,20 @@ export default function TrashScreen({ onBack, items, onRestore, onDelete, onEmpt
     };
 
     const handleDeleteSelected = () => {
-        Alert.alert(
-            'Delete Permanently',
-            `Are you sure you want to delete ${selectedIds.length} items forever?`,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Delete Forever',
-                    style: 'destructive',
-                    onPress: () => {
-                        selectedIds.forEach(id => onDelete(id));
-                        setIsSelectionMode(false);
-                        setSelectedIds([]);
-                    }
-                },
-            ]
-        );
+        setModalConfig({
+            title: 'Delete Permanently',
+            message: `Are you sure you want to delete ${selectedIds.length} items forever?`,
+            confirmText: 'Delete Forever',
+            isDestructive: true,
+            onConfirm: () => {
+                selectedIds.forEach(id => onDelete(id));
+                setIsSelectionMode(false);
+                setSelectedIds([]);
+                setModalVisible(false);
+                showAdIfReady();
+            }
+        });
+        setModalVisible(true);
     };
 
     const cancelSelection = () => {
@@ -231,6 +290,16 @@ export default function TrashScreen({ onBack, items, onRestore, onDelete, onEmpt
                     </TouchableOpacity>
                 </View>
             )}
+
+            <ConfirmationModal
+                visible={modalVisible}
+                onClose={() => setModalVisible(false)}
+                onConfirm={modalConfig.onConfirm}
+                title={modalConfig.title}
+                message={modalConfig.message}
+                confirmText={modalConfig.confirmText}
+                isDestructive={modalConfig.isDestructive}
+            />
         </View>
     );
 }

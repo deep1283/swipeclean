@@ -18,11 +18,14 @@ export default function App() {
   const [hasPermission, setHasPermission] = useState(isWeb ? true : null);
   const [trashedItems, setTrashedItems] = useState([]);
 
-  // For photo viewer
-  const [viewerAssets, setViewerAssets] = useState([]);
-  const [viewerIndex, setViewerIndex] = useState(0);
-
   useEffect(() => {
+    // Initialize Ads
+    mobileAds()
+      .initialize()
+      .then(adapterStatuses => {
+        // console.log('Ads initialized');
+      });
+
     const initialize = async () => {
       if (!isWeb) {
         checkPermission();
