@@ -132,7 +132,7 @@ const groupAssetsByDate = (assets) => {
     });
 };
 
-export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, onDeleteSelected }) {
+export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, onDeleteSelected, onOpenSettings }) {
     const [activeTab, setActiveTab] = useState('photo'); // 'photo' | 'video'
     const [viewMode, setViewMode] = useState('albums'); // 'albums' | 'assets'
     const [loading, setLoading] = useState(true);
@@ -554,9 +554,9 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
                 <View style={styles.headerContainer}>
                     <View style={styles.header}>
                         <View style={styles.headerTopRow}>
-                            <View>
-                                {/* Spacer/Title area if needed, or just left align tabs */}
-                            </View>
+                            <TouchableOpacity onPress={onOpenSettings} style={{ padding: 8 }}>
+                                <Ionicons name="settings-outline" size={24} color="#000" />
+                            </TouchableOpacity>
                             {!isPremium && (
                                 <TouchableOpacity onPress={handleRemoveAds} style={styles.premiumButton}>
                                     <Ionicons name="diamond-outline" size={16} color="#FFD700" />
@@ -609,8 +609,12 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
                 style={styles.headerGradient}
             />
 
-            {/* Top Bar with Trash */}
+            {/* Top Bar with Trash and Settings */}
             <View style={styles.header}>
+                <TouchableOpacity style={styles.iconButton} onPress={onOpenSettings}>
+                    <Ionicons name="settings-outline" size={24} color="#000" />
+                </TouchableOpacity>
+
                 <View style={styles.tabContainer}>
                     <TouchableOpacity
                         style={[styles.tab, activeTab === 'photo' && styles.activeTab]}

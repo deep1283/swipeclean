@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import GalleryScreen from './src/screens/GalleryScreen';
 import PhotoViewer from './src/screens/PhotoViewer';
 import TrashScreen from './src/screens/TrashScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { getItem, setItem, STORAGE_KEYS } from './src/utils/storage';
 import { invalidateSizeCache } from './src/utils/sizeCache';
@@ -18,13 +19,23 @@ export default function App() {
   const [hasPermission, setHasPermission] = useState(isWeb ? true : null);
   const [trashedItems, setTrashedItems] = useState([]);
 
+  // For photo viewer
+  const [viewerAssets, setViewerAssets] = useState([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
+
   useEffect(() => {
     // Initialize Ads
-    mobileAds()
-      .initialize()
-      .then(adapterStatuses => {
-        // console.log('Ads initialized');
-      });
+    if (!isWeb) {
+      try {
+        mobileAds()
+          .initialize()
+          .then(adapterStatuses => {
+            // console.log('Ads initialized');
+          });
+      } catch (error) {
+        console.log('Failed to initialize ads:', error);
+      }
+    }
 
     const initialize = async () => {
       if (!isWeb) {
@@ -158,6 +169,7 @@ export default function App() {
             <GalleryScreen
               onOpenPhoto={openPhotoViewer}
               onOpenTrash={() => setCurrentScreen('trash')}
+              onOpenSettings={() => setCurrentScreen('settings')}
               trashedCount={trashedItems.length}
               onDeleteSelected={(items) => {
                 items.forEach(item => addToTrash(item));
@@ -179,6 +191,11 @@ export default function App() {
               onRestore={restoreFromTrash}
               onDelete={deleteFromTrash}
               onEmptyTrash={emptyTrash}
+            />
+          )}
+          {currentScreen === 'settings' && (
+            <SettingsScreen
+              onClose={() => setCurrentScreen('gallery')}
             />
           )}
           <StatusBar style={currentScreen === 'viewer' ? 'light' : 'dark'} />
