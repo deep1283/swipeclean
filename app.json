@@ -58,7 +58,6 @@
         }
       ],
       "expo-localization",
-      "expo-video",
       [
         "expo-build-properties",
         {
