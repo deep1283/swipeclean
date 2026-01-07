@@ -23,12 +23,13 @@ const GridRow = React.memo(({ row, rowIndex, selectedIds, isSelectionMode, onTap
             if (item.isSpacer) return <View key={item.id} style={styles.gridItemSpacer} />;
             const isSelected = selectedIds.includes(item.id);
             return (
-                <Animated.View key={item.id} entering={FadeInDown.delay((rowIndex * 50) + (colIndex * 30)).duration(400)}>
+                <View key={item.id}>
                     <TouchableOpacity
                         style={styles.gridItem}
                         onPress={() => onTap(item)}
                         onLongPress={() => onLongPress(item.id)}
-                        activeOpacity={0.8}
+                        activeOpacity={0.7}
+                        delayLongPress={200}
                     >
                         <Image source={{ uri: item.uri }} style={styles.thumbnail} />
                         {item.mediaType === 'video' && (
@@ -45,11 +46,24 @@ const GridRow = React.memo(({ row, rowIndex, selectedIds, isSelectionMode, onTap
                             </View>
                         )}
                     </TouchableOpacity>
-                </Animated.View>
+                </View>
             );
         })}
     </View>
-));
+), (prevProps, nextProps) => {
+    // Custom comparison for better memoization
+    if (prevProps.isSelectionMode !== nextProps.isSelectionMode) return false;
+    if (prevProps.row.id !== nextProps.row.id) return false;
+
+    // Check if any item in this row changed selection status
+    for (const item of prevProps.row.data) {
+        if (item.isSpacer) continue;
+        const wasSelected = prevProps.selectedIds.includes(item.id);
+        const isSelected = nextProps.selectedIds.includes(item.id);
+        if (wasSelected !== isSelected) return false;
+    }
+    return true;
+});
 
 const styles = StyleSheet.create({
     row: {

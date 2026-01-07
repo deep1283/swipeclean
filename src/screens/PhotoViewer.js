@@ -21,7 +21,6 @@ import Animated, {
     runOnJS,
     interpolate,
     Extrapolate,
-    useAnimatedReaction,
 } from 'react-native-reanimated';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,45 +28,27 @@ import { Ionicons } from '@expo/vector-icons';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SWIPE_THRESHOLD = 120;
 
-
-
-const formatDate = (timestamp) => {
-    return new Date(timestamp).toLocaleDateString('en-US', {
-        month: 'long', day: 'numeric', year: 'numeric'
-    });
-};
-
-// Helper to calculate card dimensions based on asset aspect ratio
-const getCardDimensions = (asset) => {
-    const maxWidth = SCREEN_WIDTH - 20;
-    const maxHeight = SCREEN_HEIGHT * 0.7;
-
-    const assetWidth = asset?.width || 1;
-    const assetHeight = asset?.height || 1;
-    const aspectRatio = assetWidth / assetHeight;
-
-    if (aspectRatio > maxWidth / maxHeight) {
-        return { width: maxWidth, height: maxWidth / aspectRatio };
-    } else {
-        return { width: maxHeight * aspectRatio, height: maxHeight };
-    }
-};
-
-// --- Child Component: Handles individual card swipe ---
-function SwipeableAsset({ asset, onSwipeComplete, onUpdateSwipe, hasPrev, hasNext }) {
+// --- Single Swipeable Card Component ---
+function SwipeableCard({ asset, onSwipeComplete, hasPrev, hasNext }) {
     const translateX = useSharedValue(0);
     const translateY = useSharedValue(0);
+    const opacity = useSharedValue(1);
     const context = useSharedValue({ x: 0, y: 0 });
 
-    // Sync child's movement with parent's background scaler
-    useAnimatedReaction(
-        () => ({ x: translateX.value, y: translateY.value }),
-        (current) => {
-            if (onUpdateSwipe) {
-                runOnJS(onUpdateSwipe)(current.x, current.y);
-            }
-        }
-    );
+    // Reset position and fade in when asset changes
+    useEffect(() => {
+        // Immediately hide, reset position, then fade in
+        opacity.value = 0;
+        translateX.value = 0;
+        translateY.value = 0;
+
+        // Fade in after a brief delay to allow Video component to switch
+        const timeout = setTimeout(() => {
+            opacity.value = withTiming(1, { duration: 150 });
+        }, 50);
+
+        return () => clearTimeout(timeout);
+    }, [asset.id]);
 
     const panGesture = Gesture.Pan()
         .activeOffsetX([-20, 20])
@@ -84,31 +65,31 @@ function SwipeableAsset({ asset, onSwipeComplete, onUpdateSwipe, hasPrev, hasNex
             const isHorizontal = Math.abs(translationX) > Math.abs(translationY);
 
             if (isHorizontal) {
-                // DELETE (Left)
+                // DELETE (Swipe Left)
                 if (translationX < -SWIPE_THRESHOLD || velocityX < -800) {
-                    translateX.value = withTiming(-SCREEN_WIDTH * 1.5, { duration: 250 }, () => {
+                    translateX.value = withTiming(-SCREEN_WIDTH * 1.5, { duration: 200 }, () => {
                         runOnJS(onSwipeComplete)('delete');
                     });
                     return;
                 }
             } else {
-                // NEXT (Up) - only if hasNext
+                // NEXT (Swipe Up)
                 if ((translationY < -80 || velocityY < -800) && hasNext) {
-                    translateY.value = withTiming(-SCREEN_HEIGHT, { duration: 350, easing: Easing.out(Easing.cubic) }, () => {
+                    translateY.value = withTiming(-SCREEN_HEIGHT, { duration: 250, easing: Easing.out(Easing.cubic) }, () => {
                         runOnJS(onSwipeComplete)('next');
                     });
                     return;
                 }
-                // PREV (Down) - only if hasPrev
+                // PREV (Swipe Down)
                 if ((translationY > 80 || velocityY > 800) && hasPrev) {
-                    translateY.value = withTiming(SCREEN_HEIGHT, { duration: 350, easing: Easing.out(Easing.cubic) }, () => {
+                    translateY.value = withTiming(SCREEN_HEIGHT, { duration: 250, easing: Easing.out(Easing.cubic) }, () => {
                         runOnJS(onSwipeComplete)('prev');
                     });
                     return;
                 }
             }
 
-            // Reset if no action (bounce back)
+            // Bounce back if no action
             translateX.value = withSpring(0, { damping: 15, stiffness: 200 });
             translateY.value = withSpring(0, { damping: 15, stiffness: 200 });
         });
@@ -121,12 +102,12 @@ function SwipeableAsset({ asset, onSwipeComplete, onUpdateSwipe, hasPrev, hasNex
             Extrapolate.CLAMP
         );
         return {
+            opacity: opacity.value,
             transform: [
                 { translateX: translateX.value },
                 { translateY: translateY.value },
                 { rotate: `${rotate}deg` },
             ],
-            zIndex: 2,
         };
     });
 
@@ -143,7 +124,10 @@ function SwipeableAsset({ asset, onSwipeComplete, onUpdateSwipe, hasPrev, hasNex
     const videoRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
 
-    // console.log('SwipeableAsset asset:', asset.id, asset.mediaType, asset.uri);
+    // Reset video state when asset changes
+    useEffect(() => {
+        setIsPlaying(false);
+    }, [asset.id]);
 
     const togglePlayback = () => {
         setIsPlaying(!isPlaying);
@@ -179,7 +163,6 @@ function SwipeableAsset({ asset, onSwipeComplete, onUpdateSwipe, hasPrev, hasNex
                                 />
                             )}
                         </TouchableOpacity>
-                        {/* Pause overlay - empty touchable when playing to pause */}
                         {isPlaying && (
                             <TouchableOpacity
                                 style={styles.videoPlayButton}
@@ -208,42 +191,12 @@ function SwipeableAsset({ asset, onSwipeComplete, onUpdateSwipe, hasPrev, hasNex
     );
 }
 
-// --- Main Photo Viewer ---
+// --- Main Photo Viewer (Simplified) ---
 export default function PhotoViewer({ assets, initialIndex, onClose, onTrash }) {
     const [localAssets, setLocalAssets] = useState(assets);
     const [currentIndex, setCurrentIndex] = useState(initialIndex);
 
-    const [bgScale, setBgScale] = useState(0.5);
-    const [bgOpacity, setBgOpacity] = useState(0);
-    const [swipeDirection, setSwipeDirection] = useState('next'); // 'next' (Up/Left) or 'prev' (Down)
-
-    const handleUpdateSwipe = (x, y) => {
-        const displacement = Math.max(Math.abs(x), Math.abs(y));
-        // Progress from 0 to 1 based on swipe distance
-        const progress = Math.min(displacement, SCREEN_HEIGHT / 3) / (SCREEN_HEIGHT / 3);
-
-        // Scale: 0.5 to 1.0
-        const newScale = 0.5 + (progress * 0.5);
-        setBgScale(newScale);
-
-        // Opacity: 0 to 1 (fade in as scale grows)
-        setBgOpacity(progress);
-
-        // Determine swipe direction
-        // For horizontal swipes (delete), always show 'next' card behind
-        const isHorizontal = Math.abs(x) > Math.abs(y);
-        if (isHorizontal) {
-            setSwipeDirection('next');
-        } else {
-            // For vertical swipes, use Y direction
-            if (y > 10) setSwipeDirection('prev');
-            else setSwipeDirection('next');
-        }
-    };
-
     const handleSwipeComplete = useCallback((action) => {
-        setBgScale(0.5); // Reset BG to small
-        setBgOpacity(0); // Reset opacity
         if (action === 'delete') {
             const currentAsset = localAssets[currentIndex];
             onTrash(currentAsset);
@@ -261,15 +214,15 @@ export default function PhotoViewer({ assets, initialIndex, onClose, onTrash }) 
     // Derived State
     if (!localAssets || localAssets.length === 0) return null;
     const currentAsset = localAssets[currentIndex];
-    const nextAsset = currentIndex < localAssets.length - 1 ? localAssets[currentIndex + 1] : null;
-    const prevAsset = currentIndex > 0 ? localAssets[currentIndex - 1] : null;
+    const hasPrev = currentIndex > 0;
+    const hasNext = currentIndex < localAssets.length - 1;
     if (!currentAsset) return null;
 
     // Handle Android Back Button
     useEffect(() => {
         const onBackPress = () => {
             onClose();
-            return true; // Prevent default behavior (exit app)
+            return true;
         };
 
         const subscription = BackHandler.addEventListener(
@@ -280,7 +233,7 @@ export default function PhotoViewer({ assets, initialIndex, onClose, onTrash }) 
         return () => subscription.remove();
     }, [onClose]);
 
-    // Prefetching
+    // Prefetch adjacent images
     useEffect(() => {
         const prefetch = async () => {
             const urls = [];
@@ -295,15 +248,6 @@ export default function PhotoViewer({ assets, initialIndex, onClose, onTrash }) 
         prefetch();
     }, [currentIndex, localAssets]);
 
-    // Manual Nav Wrappers
-    const manualNext = () => handleSwipeComplete('next');
-    const manualPrev = () => handleSwipeComplete('prev');
-    const manualDelete = () => {
-        // We can't trigger swipe animation from here easily without ref
-        // So we just do the logic. Ideally we animate it out, but for now instant is safer glitch-wise.
-        handleSwipeComplete('delete');
-    };
-
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
@@ -313,51 +257,20 @@ export default function PhotoViewer({ assets, initialIndex, onClose, onTrash }) 
                     <TouchableOpacity style={styles.iconButton} onPress={onClose}>
                         <Ionicons name="close" size={24} color="#fff" />
                     </TouchableOpacity>
+                    <View style={styles.counterContainer}>
+                        <Text style={styles.counterText}>{currentIndex + 1} / {localAssets.length}</Text>
+                    </View>
                     <View style={styles.iconButtonPlaceholder} />
                 </View>
             </SafeAreaView>
 
             <View style={styles.cardContainer}>
-                {/* Background Cards (Visuals controlled by parent state) */}
-                {nextAsset && (
-                    <View style={[
-                        styles.card,
-                        styles.backgroundCard,
-                        {
-                            transform: [{ scale: bgScale }],
-                            zIndex: 1,
-                            opacity: swipeDirection === 'next' ? bgOpacity : 0
-                        }
-                    ]}>
-                        <Image source={{ uri: nextAsset.uri }} style={styles.image} resizeMode="contain" fadeDuration={0} />
-                        <View style={styles.dimLayer} />
-                    </View>
-                )}
-                {prevAsset && (
-                    <View style={[
-                        styles.card,
-                        styles.backgroundCard,
-                        {
-                            transform: [{ scale: bgScale }],
-                            zIndex: 1,
-                            opacity: swipeDirection === 'prev' ? bgOpacity : 0
-                        }
-                    ]}>
-                        <Image source={{ uri: prevAsset.uri }} style={styles.image} resizeMode="contain" fadeDuration={0} />
-                        <View style={styles.dimLayer} />
-                    </View>
-                )}
-
-
-
-                {/* Foreground Card - Keyed by ID to force remount on change */}
-                <SwipeableAsset
-                    key={currentAsset.id}
+                {/* Single Card - Simple and Clean */}
+                <SwipeableCard
                     asset={currentAsset}
                     onSwipeComplete={handleSwipeComplete}
-                    onUpdateSwipe={handleUpdateSwipe}
-                    hasPrev={!!prevAsset}
-                    hasNext={!!nextAsset}
+                    hasPrev={hasPrev}
+                    hasNext={hasNext}
                 />
             </View>
         </View>
@@ -377,16 +290,9 @@ const styles = StyleSheet.create({
     counterContainer: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 20 },
     counterText: { color: '#fff', fontSize: 14, fontWeight: '600' },
     cardContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 10 },
-    card: { width: SCREEN_WIDTH - 20, height: SCREEN_HEIGHT * 0.7, backgroundColor: '#000', borderRadius: 24, overflow: 'hidden', position: 'absolute' },
-    backgroundCard: { borderColor: '#222', backgroundColor: '#111' },
-    dimLayer: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)' },
+    card: { width: SCREEN_WIDTH - 20, height: SCREEN_HEIGHT * 0.7, backgroundColor: '#000', borderRadius: 24, overflow: 'hidden' },
     image: { flex: 1, width: '100%', height: '100%' },
-    videoIndicator: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)' },
     videoPlayButton: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', zIndex: 100 },
-    cardInfoGradient: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 120, justifyContent: 'flex-end', padding: 20, backgroundColor: 'rgba(0,0,0,0.6)' },
-    cardInfo: { justifyContent: 'flex-end' },
-    dateText: { color: '#fff', fontSize: 16, fontWeight: '600', marginBottom: 4 },
-    typeText: { color: '#aaa', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 },
     stampContainer: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
     deleteStamp: { borderWidth: 4, borderColor: '#FF3B30', borderRadius: 12, paddingHorizontal: 15, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)' },
     deleteStampText: { color: '#FF3B30', fontSize: 24, fontWeight: '900', marginLeft: 8, letterSpacing: 2 },

@@ -10,58 +10,119 @@ import {
     SafeAreaView,
     Platform,
     StatusBar,
-    Alert
+    Alert,
+    BackHandler
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { isPremiumUser, setPremiumStatus } from '../utils/premium';
+import { getPremiumPrice } from '../utils/pricing';
+import CustomModal from '../components/CustomModal';
 
-const PRIVACY_POLICY = `
-**Privacy Policy**
+const LegalHeader = ({ children }) => (
+    <Text style={styles.legalHeader}>{children}</Text>
+);
 
-**Last Updated:** January 6, 2026
+const LegalText = ({ children }) => (
+    <Text style={styles.legalText}>{children}</Text>
+);
 
-**1. Data Storage & Privacy**
-SwipeClean is designed with privacy as a priority. 
-- **Local Processing:** All photo and video analysis happens locally on your device. We do not upload your personal media to any external servers.
-- **No Account Required:** You do not need to create an account to use SwipeClean.
-- **Data Deletion:** When you delete a photo or video in SwipeClean, it is moved to the "Trash" (if supported) or permanently deleted based on your confirmation. Please be careful when deleting items.
+const PrivacyPolicyContent = () => (
+    <View>
+        <LegalText>
+            <Text style={{ fontWeight: 'bold' }}>Last Updated:</Text> January 6, 2026
+        </LegalText>
+        <View style={{ height: 16 }} />
 
-**2. Advertising**
-We use Google AdMob to display advertisements in the free version of the app. AdMob may collect and use:
-- Device Identifiers (e.g., Advertising ID)
-- Usage Data (e.g., ad interactions)
-- Diagnostics (e.g., crash logs)
-This data is used solely to provide relevant advertising and analyze app performance. Removing ads via the Premium purchase stops this data collection related to ads.
+        <LegalHeader>1. Data Storage & Privacy</LegalHeader>
+        <LegalText>SwipeClean is designed with privacy as a priority.</LegalText>
+        <LegalText>• <Text style={{ fontWeight: 'bold' }}>Local Processing:</Text> All photo and video analysis happens locally on your device. We do not upload your personal media to any external servers.</LegalText>
+        <LegalText>• <Text style={{ fontWeight: 'bold' }}>No Account Required:</Text> You do not need to create an account to use SwipeClean.</LegalText>
+        <LegalText>• <Text style={{ fontWeight: 'bold' }}>Data Deletion:</Text> When you delete a photo or video in SwipeClean, it is moved to the "Trash" (bin icon) before deleting it permanently. Please be careful when deleting items.</LegalText>
 
-**3. Contact Us**
-If you have questions about privacy, please contact us at: deepmishra1283@gmail.com
-`;
+        <LegalHeader>2. Advertising</LegalHeader>
+        <LegalText>We use Google AdMob to display advertisements in the free version of the app.</LegalText>
 
-const TERMS_OF_SERVICE = `
-**Terms and Conditions**
+        <LegalText>You can remove ads via the Premium purchase.</LegalText>
 
-**Last Updated:** January 6, 2026
+        <LegalHeader>3. Contact Us</LegalHeader>
+        <LegalText>If you have questions about privacy, please contact us at: deepmishra1283@gmail.com</LegalText>
+    </View>
+);
 
-**1. Acceptance of Terms**
-By downloading or using SwipeClean, you agree to these terms. If you do not agree, please do not use the app.
+const TermsContent = () => (
+    <View>
+        <LegalText>
+            <Text style={{ fontWeight: 'bold' }}>Last Updated:</Text> January 6, 2026
+        </LegalText>
+        <View style={{ height: 16 }} />
 
-**2. User Responsibility**
-- You are solely responsible for the photos and videos you delete. SwipeClean is a tool to assist cleanup, but accidental deletions can happen.
-- We strongly recommend backing up important media before performing bulk deletions.
-- We are not liable for any loss of data or media resulting from the use of this app.
+        <LegalHeader>1. Welcome</LegalHeader>
+        <LegalText>By using SwipeClean, you agree to these terms. We hope you find the app helpful!</LegalText>
 
-**3. Premium Purchases**
-- "Remove Ads" is a one-time purchase.
-- You may restore this purchase on other devices linked to the same app store account.
+        <LegalHeader>2. Your Content, Your Choice</LegalHeader>
+        <LegalText>• You are in full control of your photos and videos. SwipeClean is here to help you organize, but the final decision to delete something is always yours.</LegalText>
+        <LegalText>• We recommend backing up your favorite memories before doing a big cleanup, just to be safe.</LegalText>
+        <LegalText>• Please double-check before confirming deletions, as we cannot be responsible for any accidental loss of data.</LegalText>
 
-**4. Changes to Terms**
-We reserve the right to modify these terms at any time. Continued use of the app signifies acceptance of updated terms.
-`;
+        <LegalHeader>3. Premium Purchases</LegalHeader>
+        <LegalText>• "Remove Ads" is a one-time purchase.</LegalText>
+        <LegalText>• You may restore this purchase on other devices linked to the same app store account.</LegalText>
+
+        <LegalHeader>4. Changes to Terms</LegalHeader>
+        <LegalText>We reserve the right to modify these terms at any time.</LegalText>
+    </View>
+);
 
 export default function SettingsScreen({ onClose, onRestore }) {
     const [privacyVisible, setPrivacyVisible] = useState(false);
     const [termsVisible, setTermsVisible] = useState(false);
     const [premiumStatus, setPremiumStatusLocal] = useState('Checking...');
+
+    // Custom Modal State
+    const [modalConfig, setModalConfig] = useState({
+        visible: false,
+        title: '',
+        message: '',
+        icon: '',
+        confirmText: 'OK',
+        cancelText: null,
+        onConfirm: () => { },
+        type: 'info'
+    });
+
+    const price = getPremiumPrice();
+
+    const showModal = (config) => {
+        setModalConfig({ ...config, visible: true });
+    };
+
+    const hideModal = () => {
+        setModalConfig(prev => ({ ...prev, visible: false }));
+    };
+
+    React.useEffect(() => {
+        const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+            if (modalConfig.visible) {
+                setModalConfig({ ...modalConfig, visible: false });
+                return true;
+            }
+            if (privacyVisible) {
+                setPrivacyVisible(false);
+                return true;
+            }
+            if (termsVisible) {
+                setTermsVisible(false);
+                return true;
+            }
+            if (onClose) {
+                onClose();
+                return true; // prevent default behavior
+            }
+            return false;
+        });
+
+        return () => backHandler.remove();
+    }, [privacyVisible, termsVisible, onClose, modalConfig]);
 
     React.useEffect(() => {
         checkStatus();
@@ -76,31 +137,66 @@ export default function SettingsScreen({ onClose, onRestore }) {
         Linking.openURL('mailto:deepmishra1283@gmail.com?subject=SwipeClean Support');
     };
 
+    const handlePurchase = () => {
+        showModal({
+            title: "Remove Ads",
+            message: `Remove all ads for a one-time payment of ${price.label}?`,
+            icon: "diamond-outline",
+            confirmText: `Pay ${price.label}`,
+            cancelText: "Cancel",
+            type: 'default',
+            onConfirm: async () => {
+                hideModal();
+                // Simulate processing
+                setTimeout(async () => {
+                    await setPremiumStatus(true);
+                    await checkStatus();
+                    showModal({
+                        title: "Success!",
+                        message: "Ads have been removed. Thank you for your support!",
+                        icon: "checkmark-circle",
+                        type: 'success',
+                        onConfirm: hideModal
+                    });
+                }, 500);
+            },
+            onCancel: hideModal
+        });
+    };
+
     const handleRestore = async () => {
-        // Simulate restore
-        Alert.alert(
-            "Restore Purchase",
-            "Checking for previous purchases...",
-            [
-                {
-                    text: "OK", onPress: async () => {
-                        const isPrem = await isPremiumUser();
-                        if (isPrem) {
-                            Alert.alert("Already Premium", "You already have the premium version enabled.");
-                        } else {
-                            // In a real app, we'd query RevenueCat/StoreKit here
-                            // For now, we assume if they hit restore they might have it, 
-                            // but since we only have local simulation, we can't truly 'restore' from a server.
-                            // However, we can re-check the local status or prompt them.
-                            // Given the prompt, let's just re-sync status.
-                            await checkStatus();
-                            if (onRestore) onRestore();
-                            Alert.alert("Restore Completed", "Purchases have been restored.");
-                        }
+        showModal({
+            title: "Restore Purchase",
+            message: "Checking for previous purchases...",
+            icon: "refresh",
+            type: 'info',
+            onConfirm: async () => {
+                hideModal();
+                // Simulate restore check
+                setTimeout(async () => {
+                    const isPrem = await isPremiumUser();
+                    if (isPrem) {
+                        showModal({
+                            title: "Already Premium",
+                            message: "You already have the premium version enabled.",
+                            icon: "information-circle",
+                            type: 'info',
+                            onConfirm: hideModal
+                        });
+                    } else {
+                        await checkStatus();
+                        if (onRestore) onRestore();
+                        showModal({
+                            title: "Restore Completed",
+                            message: "Purchases have been restored.",
+                            icon: "checkmark-circle",
+                            type: 'success',
+                            onConfirm: hideModal
+                        });
                     }
-                }
-            ]
-        );
+                }, 1500);
+            }
+        });
     };
 
     return (
@@ -127,6 +223,12 @@ export default function SettingsScreen({ onClose, onRestore }) {
                                 </Text>
                             </View>
                         </View>
+                        {premiumStatus !== 'Premium Member' && (
+                            <TouchableOpacity style={styles.row} onPress={handlePurchase}>
+                                <Text style={styles.label}>Remove Ads (₹129)</Text>
+                                <Ionicons name="card-outline" size={20} color="#007AFF" />
+                            </TouchableOpacity>
+                        )}
                         <TouchableOpacity style={styles.row} onPress={handleRestore}>
                             <Text style={styles.label}>Restore Purchase</Text>
                             <Ionicons name="refresh" size={20} color="#007AFF" />
@@ -163,7 +265,12 @@ export default function SettingsScreen({ onClose, onRestore }) {
             </SafeAreaView>
 
             {/* Legal Modals */}
-            <Modal visible={privacyVisible} animationType="slide" presentationStyle="pageSheet">
+            <Modal
+                visible={privacyVisible}
+                animationType="slide"
+                presentationStyle="pageSheet"
+                onRequestClose={() => setPrivacyVisible(false)} // Handle Android Back Button
+            >
                 <View style={styles.modalContainer}>
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Privacy Policy</Text>
@@ -172,12 +279,17 @@ export default function SettingsScreen({ onClose, onRestore }) {
                         </TouchableOpacity>
                     </View>
                     <ScrollView contentContainerStyle={styles.modalContent}>
-                        <Text style={styles.legalText}>{PRIVACY_POLICY}</Text>
+                        <PrivacyPolicyContent />
                     </ScrollView>
                 </View>
             </Modal>
 
-            <Modal visible={termsVisible} animationType="slide" presentationStyle="pageSheet">
+            <Modal
+                visible={termsVisible}
+                animationType="slide"
+                presentationStyle="pageSheet"
+                onRequestClose={() => setTermsVisible(false)} // Handle Android Back Button
+            >
                 <View style={styles.modalContainer}>
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Terms of Service</Text>
@@ -186,11 +298,17 @@ export default function SettingsScreen({ onClose, onRestore }) {
                         </TouchableOpacity>
                     </View>
                     <ScrollView contentContainerStyle={styles.modalContent}>
-                        <Text style={styles.legalText}>{TERMS_OF_SERVICE}</Text>
+                        <TermsContent />
                     </ScrollView>
                 </View>
             </Modal>
-        </View>
+
+            <CustomModal
+                {...modalConfig}
+                onCancel={modalConfig.cancelText ? hideModal : undefined}
+                onConfirm={modalConfig.onConfirm || hideModal}
+            />
+        </View >
     );
 }
 
@@ -198,6 +316,7 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#F2F2F7',
+        paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
     },
     safeArea: {
         flex: 1,
@@ -306,10 +425,11 @@ const styles = StyleSheet.create({
         padding: 16,
         borderBottomWidth: 1,
         borderBottomColor: '#eee',
+        paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 20 : 60, // Increased top padding for notch/status bar
     },
     modalTitle: {
         fontSize: 18,
-        fontWeight: '600',
+        fontWeight: '700', // Bolder title
     },
     doneText: {
         fontSize: 17,
@@ -317,12 +437,20 @@ const styles = StyleSheet.create({
         color: '#007AFF',
     },
     modalContent: {
-        padding: 20,
+        padding: 24, // More padding
         paddingBottom: 40,
     },
+    legalHeader: {
+        fontSize: 18,
+        fontWeight: '700',
+        marginBottom: 8,
+        marginTop: 24,
+        color: '#000',
+    },
     legalText: {
-        fontSize: 15,
-        lineHeight: 22,
+        fontSize: 16,
+        lineHeight: 24, // Better line height
         color: '#333',
+        marginBottom: 8,
     },
 });

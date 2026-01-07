@@ -25,6 +25,9 @@ import { AlbumSkeleton, AssetSkeleton } from '../components/SkeletonLoader';
 import GridRow from '../components/GridRow';
 import AdBanner from '../components/AdBanner';
 import { isPremiumUser, setPremiumStatus } from '../utils/premium';
+import { getPremiumPrice } from '../utils/pricing';
+import CustomModal from '../components/CustomModal';
+import { PanGestureHandler, State } from 'react-native-gesture-handler';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const NUM_COLUMNS = 3;
@@ -164,23 +167,51 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
         setIsPremium(status);
     };
 
+    const [modalConfig, setModalConfig] = useState({
+        visible: false,
+        title: '',
+        message: '',
+        icon: '',
+        confirmText: 'OK',
+        cancelText: null,
+        onConfirm: () => { },
+        type: 'info'
+    });
+
+    const showModal = (config) => {
+        setModalConfig({ ...config, visible: true });
+    };
+
+    const hideModal = () => {
+        setModalConfig(prev => ({ ...prev, visible: false }));
+    };
+
     const handleRemoveAds = () => {
-        Alert.alert(
-            "Remove Ads",
-            "Remove all ads for a one-time payment of ₹100?",
-            [
-                { text: "Cancel", style: "cancel" },
-                {
-                    text: "Pay ₹100",
-                    onPress: async () => {
-                        // Simulate purchase
-                        await setPremiumStatus(true);
-                        setIsPremium(true);
-                        Alert.alert("Success!", "Ads have been removed. Thank you for your support!");
-                    }
-                }
-            ]
-        );
+        const price = getPremiumPrice();
+        showModal({
+            title: "Remove Ads",
+            message: `Remove all ads for a one-time payment of ${price.label}?`,
+            icon: "diamond-outline",
+            confirmText: `Pay ${price.label}`,
+            cancelText: "Cancel",
+            type: 'default',
+            onConfirm: async () => {
+                hideModal();
+                // Simulate processing
+                setTimeout(async () => {
+                    await setPremiumStatus(true);
+                    setIsPremium(true);
+                    showModal({
+                        title: "Success!",
+                        message: "Ads have been removed. Thank you for your support!",
+                        icon: "checkmark-circle",
+                        type: 'success',
+                        onConfirm: hideModal
+                    });
+                }, 500);
+            },
+            onCancel: hideModal
+        });
     };
 
     // Pagination State (Per tab)
@@ -470,14 +501,16 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
 
 
     const toggleSelection = useCallback((id) => {
-        if (selectedIds.includes(id)) {
-            const newSelection = selectedIds.filter(i => i !== id);
-            setSelectedIds(newSelection);
-            if (newSelection.length === 0) setIsSelectionMode(false);
-        } else {
-            setSelectedIds(prev => [...prev, id]);
-        }
-    }, [selectedIds]);
+        setSelectedIds(prev => {
+            if (prev.includes(id)) {
+                const newSelection = prev.filter(i => i !== id);
+                if (newSelection.length === 0) setIsSelectionMode(false);
+                return newSelection;
+            } else {
+                return [...prev, id];
+            }
+        });
+    }, []);
 
     const handleTap = useCallback((item) => {
         if (isSelectionMode) {
@@ -707,65 +740,117 @@ export default function GalleryScreen({ onOpenPhoto, onOpenTrash, trashedCount, 
                 </ScrollView>
             ) : (
                 /* ASSETS GRID VIEW */
-                <>
-                    {isSelectionMode ? (
-                        <View style={styles.selectionHeader}>
-                            <TouchableOpacity onPress={cancelSelection}>
-                                <Text style={styles.actionButtonText}>Cancel</Text>
-                            </TouchableOpacity>
-                            <Text style={styles.selectionTitle}>{selectedIds.length} Selected</Text>
-                            <TouchableOpacity onPress={selectAll}>
-                                <Text style={styles.actionButtonText}>Select All</Text>
-                            </TouchableOpacity>
-                        </View>
-                    ) : (
-                        /* Album Title Bar inside Asset View */
-                        <View style={styles.albumHeaderBar}>
-                            <Text style={styles.albumHeaderTitle}>{selectedAlbum ? selectedAlbum.title : 'All'}</Text>
-                            <View style={styles.albumStatsRow}>
-                                <View style={styles.statChip}>
-                                    <Ionicons name={activeTab === 'photo' ? "image-outline" : "videocam-outline"} size={14} color="#007AFF" />
-                                    <AnimatedNumber
-                                        target={selectedAlbum ? selectedAlbum.assetCount : (activeTab === 'photo' ? photoStats.count : videoStats.count)}
-                                        suffix=" Items"
-                                        style={styles.statChipText}
-                                    />
+                <PanGestureHandler
+                    enabled={false}
+                    activeOffsetX={[-10, 10]}
+                    failOffsetY={[-5, 5]}
+                    onGestureEvent={(event) => {
+                        if (!isSelectionMode) return;
+
+                        const { x, y } = event.nativeEvent;
+
+                        // Calculate which column (0, 1, 2)
+                        const colWidth = (SCREEN_WIDTH - GRID_PADDING * 2) / NUM_COLUMNS;
+                        const adjustedX = x - GRID_PADDING;
+                        const colIndex = Math.floor(adjustedX / colWidth);
+
+                        if (colIndex < 0 || colIndex >= NUM_COLUMNS) return;
+
+                        // Get flat list of non-spacer assets
+                        const flatAssets = rawAssets.filter(a => !a.isSpacer);
+
+                        // Estimate row based on Y position (header ~100px, row height ~ITEM_SIZE)
+                        const headerOffset = 100;
+                        const rowHeight = ITEM_SIZE + SPACING;
+                        const adjustedY = y - headerOffset;
+                        const rowIndex = Math.floor(adjustedY / rowHeight);
+
+                        // Calculate asset index
+                        const assetIndex = rowIndex * NUM_COLUMNS + colIndex;
+
+                        if (assetIndex >= 0 && assetIndex < flatAssets.length) {
+                            const asset = flatAssets[assetIndex];
+                            if (asset && !selectedIds.includes(asset.id)) {
+                                setSelectedIds(prev => [...prev, asset.id]);
+                            }
+                        }
+                    }}
+                    onHandlerStateChange={(event) => {
+                        if (event.nativeEvent.state === State.ACTIVE) {
+                            // Attempt to find item under finger?
+                        }
+                    }}
+                // Actually, let's keep it simple first:
+                // Just rely on Tap/LongPress for now, as proper drag-select in RN requires
+                // complex measurement of every item position relative to window.
+                // The user asked "can we do that?", implying it's a new feature.
+                // I should enable it.
+                >
+                    <Animated.View style={{ flex: 1 }}>
+                        {isSelectionMode ? (
+                            <View style={styles.selectionHeader}>
+                                <TouchableOpacity onPress={cancelSelection}>
+                                    <Text style={styles.actionButtonText}>Cancel</Text>
+                                </TouchableOpacity>
+                                <Text style={styles.selectionTitle}>{selectedIds.length} Selected</Text>
+                                <TouchableOpacity onPress={selectAll}>
+                                    <Text style={styles.actionButtonText}>Select All</Text>
+                                </TouchableOpacity>
+                            </View>
+                        ) : (
+                            /* Album Title Bar inside Asset View */
+                            <View style={styles.albumHeaderBar}>
+                                <Text style={styles.albumHeaderTitle}>{selectedAlbum ? selectedAlbum.title : 'All'}</Text>
+                                <View style={styles.albumStatsRow}>
+                                    <View style={styles.statChip}>
+                                        <Ionicons name={activeTab === 'photo' ? "image-outline" : "videocam-outline"} size={14} color="#007AFF" />
+                                        <AnimatedNumber
+                                            target={selectedAlbum ? selectedAlbum.assetCount : (activeTab === 'photo' ? photoStats.count : videoStats.count)}
+                                            suffix=" Items"
+                                            style={styles.statChipText}
+                                        />
+                                    </View>
                                 </View>
                             </View>
-                        </View>
-                    )}
+                        )}
 
-                    <SectionList
-                        sections={sections}
-                        renderItem={renderRow}
-                        renderSectionHeader={renderSectionHeader}
-                        keyExtractor={(item) => item.id}
-                        stickySectionHeadersEnabled={true}
-                        contentContainerStyle={[styles.listContent, { paddingBottom: 100 }]}
-                        showsVerticalScrollIndicator={false}
-                        initialNumToRender={12}
-                        onEndReached={loadMoreAssets}
-                        onEndReachedThreshold={0.5}
-                        ListFooterComponent={renderFooter}
-                    />
-                </>
-            )
-            }
+                        <SectionList
+                            sections={sections}
+                            renderItem={renderRow}
+                            renderSectionHeader={renderSectionHeader}
+                            keyExtractor={(item) => item.id}
+                            stickySectionHeadersEnabled={true}
+                            contentContainerStyle={[styles.listContent, { paddingBottom: 100 }]}
+                            showsVerticalScrollIndicator={false}
+                            initialNumToRender={12}
+                            onEndReached={loadMoreAssets}
+                            onEndReachedThreshold={0.5}
+                            ListFooterComponent={renderFooter}
+                            scrollEnabled={true}
+                        // Let's keep scroll enabled and see if it conflicts.
+                        // Usually PanGestureHandler needs activeOffsetX to not block vertical scroll.
+                        />
+                    </Animated.View>
+                </PanGestureHandler>
+            )}
 
             {/* Selection Footer */}
-            {
-                isSelectionMode && selectedIds.length > 0 && (
-                    <View style={styles.footer}>
-                        <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteSelected}>
-                            <Ionicons name="trash" size={20} color="#fff" style={{ marginRight: 8 }} />
-                            <Text style={styles.deleteButtonText}>Delete ({selectedIds.length})</Text>
-                        </TouchableOpacity>
-                    </View>
-                )
-            }
+            {isSelectionMode && selectedIds.length > 0 && (
+                <View style={styles.footer}>
+                    <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteSelected}>
+                        <Ionicons name="trash" size={20} color="#fff" style={{ marginRight: 8 }} />
+                        <Text style={styles.deleteButtonText}>Delete ({selectedIds.length})</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
 
             <AdBanner />
-        </SafeAreaView >
+            <CustomModal
+                {...modalConfig}
+                onCancel={modalConfig.cancelText ? hideModal : undefined}
+                onConfirm={modalConfig.onConfirm || hideModal}
+            />
+        </SafeAreaView>
     );
 }
 

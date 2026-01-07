@@ -165,38 +165,45 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ErrorBoundary>
         <View style={styles.appContainer}>
-          {currentScreen === 'gallery' && (
-            <GalleryScreen
-              onOpenPhoto={openPhotoViewer}
-              onOpenTrash={() => setCurrentScreen('trash')}
-              onOpenSettings={() => setCurrentScreen('settings')}
-              trashedCount={trashedItems.length}
-              onDeleteSelected={(items) => {
-                items.forEach(item => addToTrash(item));
-              }}
-            />
-          )}
+          {/* GalleryScreen should persist even when viewer/settings open to keep state */}
+          <GalleryScreen
+            // Pass visibility prop or pointer events if needed, but simple overlay works
+            onOpenPhoto={openPhotoViewer}
+            onOpenTrash={() => setCurrentScreen('trash')}
+            onOpenSettings={() => setCurrentScreen('settings')}
+            trashedCount={trashedItems.length}
+            onDeleteSelected={(items) => {
+              items.forEach(item => addToTrash(item));
+            }}
+          />
+
           {currentScreen === 'viewer' && (
-            <PhotoViewer
-              assets={viewerAssets}
-              initialIndex={viewerIndex}
-              onClose={() => setCurrentScreen('gallery')}
-              onTrash={addToTrash}
-            />
+            <View style={StyleSheet.absoluteFill}>
+              <PhotoViewer
+                assets={viewerAssets}
+                initialIndex={viewerIndex}
+                onClose={() => setCurrentScreen('gallery')}
+                onTrash={addToTrash}
+              />
+            </View>
           )}
           {currentScreen === 'trash' && (
-            <TrashScreen
-              onBack={() => setCurrentScreen('gallery')}
-              items={trashedItems}
-              onRestore={restoreFromTrash}
-              onDelete={deleteFromTrash}
-              onEmptyTrash={emptyTrash}
-            />
+            <View style={[StyleSheet.absoluteFill, { zIndex: 20 }]}>
+              <TrashScreen
+                onBack={() => setCurrentScreen('gallery')}
+                items={trashedItems}
+                onRestore={restoreFromTrash}
+                onDelete={deleteFromTrash}
+                onEmptyTrash={emptyTrash}
+              />
+            </View>
           )}
           {currentScreen === 'settings' && (
-            <SettingsScreen
-              onClose={() => setCurrentScreen('gallery')}
-            />
+            <View style={[StyleSheet.absoluteFill, { zIndex: 20 }]}>
+              <SettingsScreen
+                onClose={() => setCurrentScreen('gallery')}
+              />
+            </View>
           )}
           <StatusBar style={currentScreen === 'viewer' ? 'light' : 'dark'} />
         </View>
